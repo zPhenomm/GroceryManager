@@ -13,21 +13,24 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,11 +38,24 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.grocerymanager.data.NameNormalizer
+import com.example.grocerymanager.data.local.IngredientType
+import com.example.grocerymanager.data.repo.IngredientSuggestion
+import com.example.grocerymanager.data.repo.IngredientUiItem
+import com.example.grocerymanager.data.repo.NewIngredientMetaInput
+import com.example.grocerymanager.data.repo.RecipeIngredientInput
+import com.example.grocerymanager.data.repo.RecipeUiModel
+import com.example.grocerymanager.data.repo.ShoppingUiItem
+import com.example.grocerymanager.data.repo.StorageUiItem
+import com.example.grocerymanager.ui.GroceryViewModel
+import com.example.grocerymanager.ui.MainTab
 import com.example.grocerymanager.ui.theme.GroceryManagerTheme
+import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,89 +69,31 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class MainTab(val title: String, val shortLabel: String) {
-    Storage("Storage", "S"),
-    Recipes("Recipes", "R"),
-    Shopping("Shopping", "L")
-}
-
-private data class StorageItem(val name: String)
-
-private data class Recipe(val name: String, val ingredients: List<String>)
-
-private data class ShoppingItem(val name: String, val isBought: Boolean = false)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GroceryManagerApp() {
-    var selectedTab by rememberSaveable { mutableStateOf(MainTab.Storage) }
+    val context = LocalContext.current
+    val viewModel: GroceryViewModel = viewModel(factory = GroceryViewModel.factory(context = context))
+    val selectedTab by viewModel.selectedTab.collectAsState()
+    val storageItems by viewModel.storageItems.collectAsState()
+    val recipes by viewModel.recipes.collectAsState()
+    val shoppingItems by viewModel.shoppingItems.collectAsState()
+    val ingredients by viewModel.ingredients.collectAsState()
+    val pendingPrompt by viewModel.pendingPrompt.collectAsState()
 
-    val storageItems = remember {
-        mutableStateListOf(
-            StorageItem("Eggs"),
-            StorageItem("Milk"),
-            StorageItem("Rice"),
-            StorageItem("Tomatoes")
+    pendingPrompt?.let { prompt ->
+        NewIngredientDialog(
+            ingredientName = prompt.ingredientName,
+            onConfirm = { type, category ->
+                viewModel.confirmPendingIngredient(
+                    NewIngredientMetaInput(
+                        type = type,
+                        category = category
+                    )
+                )
+            },
+            onDismiss = viewModel::dismissPendingIngredient
         )
-    }
-
-    val recipes = remember {
-        mutableStateListOf(
-            Recipe("Omelet", listOf("Eggs", "Milk", "Salt")),
-            Recipe("Tomato Rice", listOf("Rice", "Tomatoes", "Olive Oil")),
-            Recipe("Pancakes", listOf("Eggs", "Milk", "Flour", "Sugar"))
-        )
-    }
-
-    val shoppingItems = remember { mutableStateListOf<ShoppingItem>() }
-
-    fun addStorageItem(name: String) {
-        val normalized = normalizeName(name)
-        if (normalized.isBlank()) return
-        if (storageItems.any { nameKey(it.name) == nameKey(normalized) }) return
-        storageItems.add(StorageItem(normalized))
-    }
-
-    fun removeStorageItem(item: StorageItem) {
-        storageItems.remove(item)
-    }
-
-    fun addRecipe(name: String, ingredients: List<String>) {
-        val normalizedName = normalizeName(name)
-        if (normalizedName.isBlank()) return
-        if (ingredients.isEmpty()) return
-        recipes.add(Recipe(normalizedName, ingredients))
-    }
-
-    fun addMissingIngredientsToShopping(recipe: Recipe) {
-        val missing = missingIngredients(recipe, storageItems)
-        if (missing.isEmpty()) return
-        val existingKeys = shoppingItems.map { nameKey(it.name) }.toSet()
-        val newItems = missing.filter { nameKey(it) !in existingKeys }
-        newItems.forEach { shoppingItems.add(ShoppingItem(it)) }
-    }
-
-    fun addShoppingItem(name: String) {
-        val normalized = normalizeName(name)
-        if (normalized.isBlank()) return
-        if (shoppingItems.any { nameKey(it.name) == nameKey(normalized) }) return
-        shoppingItems.add(ShoppingItem(normalized))
-    }
-
-    fun toggleShoppingItem(index: Int) {
-        val item = shoppingItems[index]
-        shoppingItems[index] = item.copy(isBought = !item.isBought)
-    }
-
-    fun removeShoppingItem(item: ShoppingItem) {
-        shoppingItems.remove(item)
-    }
-
-    fun moveBoughtToStorage() {
-        val bought = shoppingItems.filter { it.isBought }
-        if (bought.isEmpty()) return
-        bought.forEach { addStorageItem(it.name) }
-        shoppingItems.removeAll { it.isBought }
     }
 
     Scaffold(
@@ -145,7 +103,7 @@ private fun GroceryManagerApp() {
                 MainTab.entries.forEach { tab ->
                     NavigationBarItem(
                         selected = selectedTab == tab,
-                        onClick = { selectedTab = tab },
+                        onClick = { viewModel.selectTab(tab) },
                         icon = { Text(tab.shortLabel) },
                         label = { Text(tab.title) }
                     )
@@ -156,23 +114,33 @@ private fun GroceryManagerApp() {
         when (selectedTab) {
             MainTab.Storage -> StorageScreen(
                 storageItems = storageItems,
-                onAddItem = ::addStorageItem,
-                onDeleteItem = ::removeStorageItem,
+                onAddItem = viewModel::requestAddStorage,
+                onDeleteItem = { viewModel.removeStorageItem(it) },
+                suggestionProvider = viewModel::searchIngredientSuggestions,
                 modifier = Modifier.padding(padding)
             )
+
             MainTab.Recipes -> RecipesScreen(
                 recipes = recipes,
-                storageItems = storageItems,
-                onAddRecipe = ::addRecipe,
-                onAddMissingToShopping = ::addMissingIngredientsToShopping,
+                onAddRecipe = viewModel::requestAddRecipe,
+                onAddMissingToShopping = viewModel::addMissingIngredientsToShopping,
+                suggestionProvider = viewModel::searchIngredientSuggestions,
                 modifier = Modifier.padding(padding)
             )
+
             MainTab.Shopping -> ShoppingScreen(
                 shoppingItems = shoppingItems,
-                onToggleBought = ::toggleShoppingItem,
-                onRemoveItem = ::removeShoppingItem,
-                onMoveBoughtToStorage = ::moveBoughtToStorage,
-                onAddItem = ::addShoppingItem,
+                onToggleBought = { viewModel.toggleShoppingItem(it) },
+                onRemoveItem = { viewModel.removeShoppingItem(it) },
+                onMoveBoughtToStorage = viewModel::moveBoughtToStorage,
+                onAddItem = viewModel::requestAddShopping,
+                suggestionProvider = viewModel::searchIngredientSuggestions,
+                modifier = Modifier.padding(padding)
+            )
+
+            MainTab.Ingredients -> IngredientsScreen(
+                ingredients = ingredients,
+                onUpdateIngredient = viewModel::updateIngredientMetadata,
                 modifier = Modifier.padding(padding)
             )
         }
@@ -181,13 +149,18 @@ private fun GroceryManagerApp() {
 
 @Composable
 private fun StorageScreen(
-    storageItems: List<StorageItem>,
-    onAddItem: (String) -> Unit,
-    onDeleteItem: (StorageItem) -> Unit,
+    storageItems: List<StorageUiItem>,
+    onAddItem: (String, Double?) -> Unit,
+    onDeleteItem: (Long) -> Unit,
+    suggestionProvider: (String) -> kotlinx.coroutines.flow.Flow<List<IngredientSuggestion>>,
     modifier: Modifier = Modifier
 ) {
     var newItem by rememberSaveable { mutableStateOf("") }
-    val canAddItem = newItem.isNotBlank()
+    var amountText by rememberSaveable { mutableStateOf("") }
+    val suggestionsFlow = remember(newItem) { suggestionProvider(newItem) }
+    val suggestions by suggestionsFlow.collectAsState(initial = emptyList())
+    val matched = suggestions.firstOrNull { NameNormalizer.nameKey(it.name) == NameNormalizer.nameKey(newItem) }
+    val showAmount = newItem.isNotBlank() && (matched == null || matched.type == IngredientType.QUANTITY_TRACKED)
 
     Column(
         modifier = modifier
@@ -197,27 +170,37 @@ private fun StorageScreen(
     ) {
         Text("What is currently in your kitchen?", fontWeight = FontWeight.SemiBold)
 
-        Row(
+        OutlinedTextField(
+            value = newItem,
+            onValueChange = { newItem = it },
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextField(
-                value = newItem,
-                onValueChange = { newItem = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Add item") },
+            label = { Text("Ingredient") },
+            singleLine = true
+        )
+        IngredientSuggestionList(
+            suggestions = suggestions,
+            onSelect = { newItem = it }
+        )
+
+        if (showAmount) {
+            OutlinedTextField(
+                value = amountText,
+                onValueChange = { amountText = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Amount (optional, default 1)") },
                 singleLine = true
             )
-            Button(
-                onClick = {
-                    onAddItem(newItem)
-                    newItem = ""
-                },
-                enabled = canAddItem
-            ) {
-                Text("Add")
-            }
+        }
+
+        Button(
+            onClick = {
+                onAddItem(newItem, parsePositiveDouble(amountText))
+                newItem = ""
+                amountText = ""
+            },
+            enabled = newItem.isNotBlank()
+        ) {
+            Text("Add to storage")
         }
 
         if (storageItems.isEmpty()) {
@@ -227,7 +210,7 @@ private fun StorageScreen(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(storageItems, key = { nameKey(it.name) }) { item ->
+                items(storageItems, key = { it.ingredientId }) { item ->
                     OutlinedCard {
                         Row(
                             modifier = Modifier
@@ -236,8 +219,14 @@ private fun StorageScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(item.name)
-                            TextButton(onClick = { onDeleteItem(item) }) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(item.name)
+                                when (item.type) {
+                                    IngredientType.PRESENCE_ONLY -> Text("Available")
+                                    IngredientType.QUANTITY_TRACKED -> Text("Amount: ${formatAmount(item.amount)}")
+                                }
+                            }
+                            TextButton(onClick = { onDeleteItem(item.ingredientId) }) {
                                 Text("Remove")
                             }
                         }
@@ -248,26 +237,25 @@ private fun StorageScreen(
     }
 }
 
+private data class RecipeDraftIngredient(
+    val id: Int,
+    val name: String,
+    val amountText: String
+)
+
 @Composable
 private fun RecipesScreen(
-    recipes: List<Recipe>,
-    storageItems: List<StorageItem>,
-    onAddRecipe: (String, List<String>) -> Unit,
-    onAddMissingToShopping: (Recipe) -> Unit,
+    recipes: List<RecipeUiModel>,
+    onAddRecipe: (String, List<RecipeIngredientInput>) -> Unit,
+    onAddMissingToShopping: (Long) -> Unit,
+    suggestionProvider: (String) -> kotlinx.coroutines.flow.Flow<List<IngredientSuggestion>>,
     modifier: Modifier = Modifier
 ) {
     var recipeName by rememberSaveable { mutableStateOf("") }
-    var ingredientInput by rememberSaveable { mutableStateOf("") }
-    val parsedIngredients = parseIngredients(ingredientInput)
-
-    val sortedRecipes = recipes.map { recipe ->
-        val missing = missingIngredients(recipe, storageItems)
-        RecipeUiModel(recipe, missing)
-    }.sortedWith(
-        compareBy<RecipeUiModel> { it.missing.isNotEmpty() }
-            .thenBy { it.missing.size }
-            .thenBy { it.recipe.name.lowercase() }
-    )
+    var nextRowId by rememberSaveable { mutableIntStateOf(2) }
+    val draftIngredients = remember {
+        mutableStateListOf(RecipeDraftIngredient(id = 1, name = "", amountText = ""))
+    }
 
     Column(
         modifier = modifier
@@ -284,44 +272,136 @@ private fun RecipesScreen(
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                TextField(
+                OutlinedTextField(
                     value = recipeName,
                     onValueChange = { recipeName = it },
-                    placeholder = { Text("Recipe name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Recipe name") },
                     singleLine = true
                 )
-                TextField(
-                    value = ingredientInput,
-                    onValueChange = { ingredientInput = it },
-                    placeholder = { Text("Ingredients (comma separated)") },
-                    singleLine = true
-                )
-                Button(
-                    onClick = {
-                        onAddRecipe(recipeName, parsedIngredients)
-                        recipeName = ""
-                        ingredientInput = ""
-                    },
-                    enabled = recipeName.isNotBlank() && parsedIngredients.isNotEmpty()
-                ) {
-                    Text("Add recipe")
+
+                draftIngredients.forEachIndexed { index, row ->
+                    RecipeIngredientRow(
+                        row = row,
+                        canRemove = draftIngredients.size > 1,
+                        onRowChange = { updated -> draftIngredients[index] = updated },
+                        onRemove = { draftIngredients.removeAt(index) },
+                        suggestionProvider = suggestionProvider
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            draftIngredients.add(
+                                RecipeDraftIngredient(
+                                    id = nextRowId,
+                                    name = "",
+                                    amountText = ""
+                                )
+                            )
+                            nextRowId += 1
+                        }
+                    ) {
+                        Text("Add ingredient row")
+                    }
+
+                    Button(
+                        onClick = {
+                            val inputs = draftIngredients.mapNotNull {
+                                val normalized = NameNormalizer.normalizeName(it.name)
+                                if (normalized.isBlank()) {
+                                    null
+                                } else {
+                                    RecipeIngredientInput(
+                                        name = normalized,
+                                        requiredAmount = parsePositiveDouble(it.amountText)
+                                    )
+                                }
+                            }
+                            onAddRecipe(recipeName, inputs)
+                            recipeName = ""
+                            draftIngredients.clear()
+                            draftIngredients.add(RecipeDraftIngredient(id = 1, name = "", amountText = ""))
+                            nextRowId = 2
+                        },
+                        enabled = recipeName.isNotBlank() &&
+                            draftIngredients.any { NameNormalizer.normalizeName(it.name).isNotBlank() }
+                    ) {
+                        Text("Add recipe")
+                    }
                 }
             }
         }
 
-        if (sortedRecipes.isEmpty()) {
+        if (recipes.isEmpty()) {
             EmptyState("No recipes yet.")
         } else {
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(sortedRecipes, key = { nameKey(it.recipe.name) }) { model ->
+                items(recipes, key = { it.recipeId }) { recipe ->
                     RecipeCard(
-                        model = model,
-                        onAddMissingToShopping = { onAddMissingToShopping(model.recipe) }
+                        model = recipe,
+                        onAddMissingToShopping = { onAddMissingToShopping(recipe.recipeId) }
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecipeIngredientRow(
+    row: RecipeDraftIngredient,
+    canRemove: Boolean,
+    onRowChange: (RecipeDraftIngredient) -> Unit,
+    onRemove: () -> Unit,
+    suggestionProvider: (String) -> kotlinx.coroutines.flow.Flow<List<IngredientSuggestion>>
+) {
+    val suggestionsFlow = remember(row.name) { suggestionProvider(row.name) }
+    val suggestions by suggestionsFlow.collectAsState(initial = emptyList())
+    val matched = suggestions.firstOrNull { NameNormalizer.nameKey(it.name) == NameNormalizer.nameKey(row.name) }
+    val showAmount = row.name.isNotBlank() && (matched == null || matched.type == IngredientType.QUANTITY_TRACKED)
+
+    OutlinedCard {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = row.name,
+                    onValueChange = { onRowChange(row.copy(name = it)) },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("Ingredient") },
+                    singleLine = true
+                )
+                TextButton(onClick = onRemove, enabled = canRemove) {
+                    Text("Remove")
+                }
+            }
+
+            IngredientSuggestionList(
+                suggestions = suggestions,
+                onSelect = { onRowChange(row.copy(name = it)) }
+            )
+
+            if (showAmount) {
+                OutlinedTextField(
+                    value = row.amountText,
+                    onValueChange = { onRowChange(row.copy(amountText = it)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Required amount (optional, default 1)") },
+                    singleLine = true
+                )
             }
         }
     }
@@ -339,8 +419,18 @@ private fun RecipeCard(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(model.recipe.name, fontWeight = FontWeight.SemiBold)
-            Text("Ingredients: ${model.recipe.ingredients.joinToString(", ")}")
+            Text(model.name, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Ingredients: ${
+                    model.ingredients.joinToString(", ") { ingredient ->
+                        when (ingredient.type) {
+                            IngredientType.PRESENCE_ONLY -> ingredient.name
+                            IngredientType.QUANTITY_TRACKED ->
+                                "${ingredient.name} (${formatAmount(ingredient.requiredAmount)})"
+                        }
+                    }
+                }"
+            )
 
             if (model.missing.isEmpty()) {
                 Text("Cookable with current storage.")
@@ -348,7 +438,13 @@ private fun RecipeCard(
                     Text("All ingredients available")
                 }
             } else {
-                Text("Missing (${model.missing.size}): ${model.missing.joinToString(", ")}")
+                Text(
+                    "Missing (${model.missing.size}): ${
+                        model.missing.joinToString(", ") {
+                            if (it.missingAmount == null) it.name else "${it.name} (${formatAmount(it.missingAmount)})"
+                        }
+                    }"
+                )
                 Button(onClick = onAddMissingToShopping) {
                     Text("Add missing to shopping list")
                 }
@@ -359,16 +455,21 @@ private fun RecipeCard(
 
 @Composable
 private fun ShoppingScreen(
-    shoppingItems: List<ShoppingItem>,
-    onToggleBought: (Int) -> Unit,
-    onRemoveItem: (ShoppingItem) -> Unit,
+    shoppingItems: List<ShoppingUiItem>,
+    onToggleBought: (Long) -> Unit,
+    onRemoveItem: (Long) -> Unit,
     onMoveBoughtToStorage: () -> Unit,
-    onAddItem: (String) -> Unit,
+    onAddItem: (String, Double?) -> Unit,
+    suggestionProvider: (String) -> kotlinx.coroutines.flow.Flow<List<IngredientSuggestion>>,
     modifier: Modifier = Modifier
 ) {
     var newItem by rememberSaveable { mutableStateOf("") }
+    var quantityText by rememberSaveable { mutableStateOf("") }
     val hasBought = shoppingItems.any { it.isBought }
-    val canAddItem = newItem.isNotBlank()
+    val suggestionsFlow = remember(newItem) { suggestionProvider(newItem) }
+    val suggestions by suggestionsFlow.collectAsState(initial = emptyList())
+    val matched = suggestions.firstOrNull { NameNormalizer.nameKey(it.name) == NameNormalizer.nameKey(newItem) }
+    val showQuantity = newItem.isNotBlank() && (matched == null || matched.type == IngredientType.QUANTITY_TRACKED)
 
     Column(
         modifier = modifier
@@ -378,34 +479,43 @@ private fun ShoppingScreen(
     ) {
         Text("Pick up items and move them to storage.", fontWeight = FontWeight.SemiBold)
 
-        Row(
+        OutlinedTextField(
+            value = newItem,
+            onValueChange = { newItem = it },
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextField(
-                value = newItem,
-                onValueChange = { newItem = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Add shopping item") },
+            label = { Text("Ingredient") },
+            singleLine = true
+        )
+        IngredientSuggestionList(
+            suggestions = suggestions,
+            onSelect = { newItem = it }
+        )
+
+        if (showQuantity) {
+            OutlinedTextField(
+                value = quantityText,
+                onValueChange = { quantityText = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Quantity (optional, default 1)") },
                 singleLine = true
             )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = {
-                    onAddItem(newItem)
+                    onAddItem(newItem, parsePositiveDouble(quantityText))
                     newItem = ""
+                    quantityText = ""
                 },
-                enabled = canAddItem
+                enabled = newItem.isNotBlank()
             ) {
                 Text("Add")
             }
-        }
 
-        Button(
-            onClick = onMoveBoughtToStorage,
-            enabled = hasBought
-        ) {
-            Text("Move bought items to storage")
+            Button(onClick = onMoveBoughtToStorage, enabled = hasBought) {
+                Text("Move bought items to storage")
+            }
         }
 
         if (shoppingItems.isEmpty()) {
@@ -415,7 +525,7 @@ private fun ShoppingScreen(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(shoppingItems, key = { nameKey(it.name) }) { item ->
+                items(shoppingItems, key = { it.ingredientId }) { item ->
                     OutlinedCard {
                         Row(
                             modifier = Modifier
@@ -426,25 +536,235 @@ private fun ShoppingScreen(
                         ) {
                             Checkbox(
                                 checked = item.isBought,
-                                onCheckedChange = {
-                                    val index = shoppingItems.indexOf(item)
-                                    if (index >= 0) onToggleBought(index)
-                                }
+                                onCheckedChange = { onToggleBought(item.ingredientId) }
                             )
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = item.name,
+                                    text = when (item.type) {
+                                        IngredientType.PRESENCE_ONLY -> item.name
+                                        IngredientType.QUANTITY_TRACKED ->
+                                            "${item.name} (${formatAmount(item.quantity)})"
+                                    },
                                     textDecoration = if (item.isBought) TextDecoration.LineThrough else null
                                 )
                                 if (item.isBought) {
                                     Text("Ready to move to storage")
                                 }
                             }
-                            TextButton(onClick = { onRemoveItem(item) }) {
+                            TextButton(onClick = { onRemoveItem(item.ingredientId) }) {
                                 Text("Remove")
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun IngredientsScreen(
+    ingredients: List<IngredientUiItem>,
+    onUpdateIngredient: (Long, IngredientType, String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var search by rememberSaveable { mutableStateOf("") }
+    var editingItem by remember { mutableStateOf<IngredientUiItem?>(null) }
+
+    val filtered = remember(ingredients, search) {
+        if (search.isBlank()) {
+            ingredients
+        } else {
+            val key = NameNormalizer.nameKey(search)
+            ingredients.filter {
+                NameNormalizer.nameKey(it.name).contains(key) ||
+                    NameNormalizer.nameKey(it.category).contains(key)
+            }
+        }
+    }
+
+    editingItem?.let { item ->
+        EditIngredientDialog(
+            ingredient = item,
+            onConfirm = { type, category ->
+                onUpdateIngredient(item.ingredientId, type, category)
+                editingItem = null
+            },
+            onDismiss = { editingItem = null }  //TODO: Assigned value is never read
+        )
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("Manage ingredient types and categories.", fontWeight = FontWeight.SemiBold)
+
+        OutlinedTextField(
+            value = search,
+            onValueChange = { search = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Search ingredients") },
+            singleLine = true
+        )
+
+        if (filtered.isEmpty()) {
+            EmptyState("No ingredients found.")
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(filtered, key = { it.ingredientId }) { item ->
+                    OutlinedCard {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(item.name, fontWeight = FontWeight.SemiBold)
+                                Text("Type: ${item.type.readableLabel()}")
+                                Text("Category: ${item.category}")
+                            }
+                            TextButton(onClick = { editingItem = item }) {
+                                Text("Edit")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditIngredientDialog(
+    ingredient: IngredientUiItem,
+    onConfirm: (IngredientType, String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var selectedType by remember(ingredient.ingredientId) { mutableStateOf(ingredient.type) }
+    var category by remember(ingredient.ingredientId) { mutableStateOf(ingredient.category) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit ${ingredient.name}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = category,
+                    onValueChange = { category = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Category") },
+                    singleLine = true
+                )
+                IngredientTypeSelector(
+                    selectedType = selectedType,
+                    onTypeSelected = { selectedType = it }
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(selectedType, category) },
+                enabled = NameNormalizer.normalizeName(category).isNotBlank()
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+private fun NewIngredientDialog(
+    ingredientName: String,
+    onConfirm: (IngredientType, String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var selectedType by remember(ingredientName) { mutableStateOf(IngredientType.QUANTITY_TRACKED) }
+    var category by remember(ingredientName) { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Create ingredient") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(ingredientName)
+                OutlinedTextField(
+                    value = category,
+                    onValueChange = { category = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Category") },
+                    singleLine = true
+                )
+                IngredientTypeSelector(
+                    selectedType = selectedType,
+                    onTypeSelected = { selectedType = it }
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(selectedType, category) },
+                enabled = NameNormalizer.normalizeName(category).isNotBlank()
+            ) {
+                Text("Create")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+private fun IngredientTypeSelector(
+    selectedType: IngredientType,
+    onTypeSelected: (IngredientType) -> Unit
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(
+            onClick = { onTypeSelected(IngredientType.QUANTITY_TRACKED) },
+            enabled = selectedType != IngredientType.QUANTITY_TRACKED
+        ) {
+            Text("Quantity tracked")
+        }
+        OutlinedButton(
+            onClick = { onTypeSelected(IngredientType.PRESENCE_ONLY) },
+            enabled = selectedType != IngredientType.PRESENCE_ONLY
+        ) {
+            Text("Presence only")
+        }
+    }
+}
+
+@Composable
+private fun IngredientSuggestionList(
+    suggestions: List<IngredientSuggestion>,
+    onSelect: (String) -> Unit
+) {
+    if (suggestions.isEmpty()) return
+
+    OutlinedCard {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            suggestions.forEach { suggestion ->
+                TextButton(
+                    onClick = { onSelect(suggestion.name) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("${suggestion.name} (${suggestion.type.readableLabel()}, ${suggestion.category})")
                 }
             }
         }
@@ -463,32 +783,25 @@ private fun EmptyState(message: String) {
     }
 }
 
-private data class RecipeUiModel(val recipe: Recipe, val missing: List<String>)
-
-private fun parseIngredients(input: String): List<String> {
-    return input.split(",")
-        .map { normalizeName(it) }
-        .filter { it.isNotBlank() }
-        .distinctBy { nameKey(it) }
+private fun parsePositiveDouble(input: String): Double? {
+    val value = input.trim().replace(",", ".").toDoubleOrNull() ?: return null
+    return if (value > 0.0) value else null
 }
 
-private fun missingIngredients(recipe: Recipe, storageItems: List<StorageItem>): List<String> {
-    val storageKeys = storageItems.map { nameKey(it.name) }.toSet()
-    return recipe.ingredients.filter { nameKey(it) !in storageKeys }
+private fun formatAmount(amount: Double?): String {
+    if (amount == null) return "-"
+    val asLong = amount.toLong().toDouble()
+    return if (abs(amount - asLong) < 1e-9) {
+        asLong.toLong().toString()
+    } else {
+        //TODO: Implicitly using the default locale is a common source of bugs: Use String.format(Locale, ...) instead
+        String.format("%.2f", amount).trimEnd('0').trimEnd('.')
+    }
 }
 
-private fun normalizeName(input: String): String {
-    return input.trim().replace(Regex("\\s+"), " ")
-}
-
-private fun nameKey(input: String): String {
-    return normalizeName(input).lowercase()
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun GroceryManagerPreview() {
-    GroceryManagerTheme {
-        GroceryManagerApp()
+private fun IngredientType.readableLabel(): String {
+    return when (this) {
+        IngredientType.QUANTITY_TRACKED -> "quantity-tracked"
+        IngredientType.PRESENCE_ONLY -> "presence-only"
     }
 }
