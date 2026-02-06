@@ -1,5 +1,6 @@
 package com.example.grocerymanager
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -71,9 +72,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            GroceryManagerTheme {
-                GroceryManagerApp()
-            }
+            GroceryManagerApp()
         }
     }
 }
@@ -82,6 +81,19 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun GroceryManagerApp() {
     val context = LocalContext.current
+    val systemDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+    val sharedPreferences = remember(context) {
+        context.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
+    }
+    var darkModeEnabled by rememberSaveable {
+        mutableStateOf(
+            if (sharedPreferences.contains(DARK_MODE_KEY)) {
+                sharedPreferences.getBoolean(DARK_MODE_KEY, false)
+            } else {
+                systemDarkTheme
+            }
+        )
+    }
     val viewModel: GroceryViewModel = viewModel(factory = GroceryViewModel.factory(context = context))
     val selectedTab by viewModel.selectedTab.collectAsState()
     val storageItems by viewModel.storageItems.collectAsState()
@@ -110,58 +122,65 @@ private fun GroceryManagerApp() {
         )
     }
 
-    Scaffold(
-        topBar = { CenterAlignedTopAppBar(title = { Text(selectedTab.title) }) },
-        bottomBar = {
-            NavigationBar {
-                MainTab.entries.forEach { tab ->
-                    NavigationBarItem(
-                        selected = selectedTab == tab,
-                        onClick = { viewModel.selectTab(tab) },
-                        icon = { Text(tab.shortLabel) },
-                        label = { Text(tab.title) }
-                    )
+    GroceryManagerTheme(darkTheme = darkModeEnabled) {
+        Scaffold(
+            topBar = { CenterAlignedTopAppBar(title = { Text(selectedTab.title) }) },
+            bottomBar = {
+                NavigationBar {
+                    MainTab.entries.forEach { tab ->
+                        NavigationBarItem(
+                            selected = selectedTab == tab,
+                            onClick = { viewModel.selectTab(tab) },
+                            icon = { Text(tab.shortLabel) },
+                            label = { Text(tab.title) }
+                        )
+                    }
                 }
             }
-        }
-    ) { padding ->
-        when (selectedTab) {
-            MainTab.Storage -> StorageScreen(
-                storageItems = storageItems,
-                onAddItem = viewModel::requestAddStorage,
-                onDeleteItem = { viewModel.removeStorageItem(it) },
-                suggestionProvider = viewModel::searchIngredientSuggestions,
-                modifier = Modifier.padding(padding)
-            )
+        ) { padding ->
+            when (selectedTab) {
+                MainTab.Storage -> StorageScreen(
+                    storageItems = storageItems,
+                    onAddItem = viewModel::requestAddStorage,
+                    onDeleteItem = { viewModel.removeStorageItem(it) },
+                    suggestionProvider = viewModel::searchIngredientSuggestions,
+                    modifier = Modifier.padding(padding)
+                )
 
-            MainTab.Recipes -> RecipesScreen(
-                recipes = recipes,
-                onAddRecipe = viewModel::requestAddRecipe,
-                onDeleteRecipe = viewModel::deleteRecipe,
-                onAddMissingToShopping = viewModel::addMissingIngredientsToShopping,
-                onCookRecipe = viewModel::cookRecipe,
-                suggestionProvider = viewModel::searchIngredientSuggestions,
-                modifier = Modifier.padding(padding)
-            )
+                MainTab.Recipes -> RecipesScreen(
+                    recipes = recipes,
+                    onAddRecipe = viewModel::requestAddRecipe,
+                    onDeleteRecipe = viewModel::deleteRecipe,
+                    onAddMissingToShopping = viewModel::addMissingIngredientsToShopping,
+                    onCookRecipe = viewModel::cookRecipe,
+                    suggestionProvider = viewModel::searchIngredientSuggestions,
+                    modifier = Modifier.padding(padding)
+                )
 
-            MainTab.Shopping -> ShoppingScreen(
-                shoppingItems = shoppingItems,
-                onToggleBought = { viewModel.toggleShoppingItem(it) },
-                onRemoveItem = { viewModel.removeShoppingItem(it) },
-                onMoveBoughtToStorage = viewModel::moveBoughtToStorage,
-                onAddItem = viewModel::requestAddShopping,
-                suggestionProvider = viewModel::searchIngredientSuggestions,
-                modifier = Modifier.padding(padding)
-            )
+                MainTab.Shopping -> ShoppingScreen(
+                    shoppingItems = shoppingItems,
+                    onToggleBought = { viewModel.toggleShoppingItem(it) },
+                    onRemoveItem = { viewModel.removeShoppingItem(it) },
+                    onMoveBoughtToStorage = viewModel::moveBoughtToStorage,
+                    onAddItem = viewModel::requestAddShopping,
+                    suggestionProvider = viewModel::searchIngredientSuggestions,
+                    modifier = Modifier.padding(padding)
+                )
 
-            MainTab.Ingredients -> IngredientsScreen(
-                ingredients = ingredients,
-                categories = categories,
-                onUpdateIngredient = viewModel::updateIngredientMetadata,
-                onDeleteIngredient = viewModel::deleteIngredient,
-                onDeleteCategory = viewModel::deleteCategory,
-                modifier = Modifier.padding(padding)
-            )
+                MainTab.Ingredients -> IngredientsScreen(
+                    ingredients = ingredients,
+                    categories = categories,
+                    isDarkModeEnabled = darkModeEnabled,
+                    onDarkModeChange = { enabled ->
+                        darkModeEnabled = enabled
+                        sharedPreferences.edit().putBoolean(DARK_MODE_KEY, enabled).apply()
+                    },
+                    onUpdateIngredient = viewModel::updateIngredientMetadata,
+                    onDeleteIngredient = viewModel::deleteIngredient,
+                    onDeleteCategory = viewModel::deleteCategory,
+                    modifier = Modifier.padding(padding)
+                )
+            }
         }
     }
 }
@@ -660,6 +679,8 @@ private fun ShoppingScreen(
 private fun IngredientsScreen(
     ingredients: List<IngredientUiItem>,
     categories: List<CategoryUiItem>,
+    isDarkModeEnabled: Boolean,
+    onDarkModeChange: (Boolean) -> Unit,
     onUpdateIngredient: (Long, IngredientType, String) -> Unit,
     onDeleteIngredient: (Long) -> Unit,
     onDeleteCategory: (String) -> Unit,
@@ -736,6 +757,24 @@ private fun IngredientsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text("Manage ingredient types and categories.", fontWeight = FontWeight.SemiBold)
+        OutlinedCard {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Dark mode", fontWeight = FontWeight.SemiBold)
+                    Text("Use dark colors across the app.")
+                }
+                Checkbox(
+                    checked = isDarkModeEnabled,
+                    onCheckedChange = onDarkModeChange
+                )
+            }
+        }
 
         OutlinedTextField(
             value = search,
@@ -1068,3 +1107,5 @@ private fun IngredientType.readableLabel(): String {
 }
 
 private const val DEFAULT_CATEGORY_NAME = "Uncategorized"
+private const val THEME_PREFS = "grocery_manager_settings"
+private const val DARK_MODE_KEY = "dark_mode_enabled"
