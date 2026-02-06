@@ -188,6 +188,10 @@ private fun StorageScreen(
     val filteredSuggestions = remember(suggestions, presenceOnlyKeysInStorage) {
         suggestions.filter { NameNormalizer.nameKey(it.name) !in presenceOnlyKeysInStorage }
     }
+    val showSuggestions = remember(newItem) { NameNormalizer.nameKey(newItem).length >= 2 }
+    val visibleSuggestions = remember(filteredSuggestions, showSuggestions) {
+        if (showSuggestions) filteredSuggestions else emptyList()
+    }
     val showAmount = newItem.isNotBlank() && (matched == null || matched.type == IngredientType.QUANTITY_TRACKED)
 
     Column(
@@ -206,7 +210,7 @@ private fun StorageScreen(
             singleLine = true
         )
         IngredientSuggestionList(
-            suggestions = filteredSuggestions,
+            suggestions = visibleSuggestions,
             onSelect = { newItem = it }
         )
 
@@ -411,6 +415,10 @@ private fun RecipeIngredientRow(
     val suggestionsFlow = remember(row.name) { suggestionProvider(row.name) }
     val suggestions by suggestionsFlow.collectAsState(initial = emptyList())
     val matched = suggestions.firstOrNull { NameNormalizer.nameKey(it.name) == NameNormalizer.nameKey(row.name) }
+    val showSuggestions = remember(row.name) { NameNormalizer.nameKey(row.name).length >= 2 }
+    val visibleSuggestions = remember(suggestions, showSuggestions) {
+        if (showSuggestions) suggestions else emptyList()
+    }
     val showAmount = row.name.isNotBlank() && (matched == null || matched.type == IngredientType.QUANTITY_TRACKED)
 
     OutlinedCard {
@@ -438,7 +446,7 @@ private fun RecipeIngredientRow(
             }
 
             IngredientSuggestionList(
-                suggestions = suggestions,
+                suggestions = visibleSuggestions,
                 onSelect = { onRowChange(row.copy(name = it)) }
             )
 
@@ -545,6 +553,10 @@ private fun ShoppingScreen(
     val suggestionsFlow = remember(newItem) { suggestionProvider(newItem) }
     val suggestions by suggestionsFlow.collectAsState(initial = emptyList())
     val matched = suggestions.firstOrNull { NameNormalizer.nameKey(it.name) == NameNormalizer.nameKey(newItem) }
+    val showSuggestions = remember(newItem) { NameNormalizer.nameKey(newItem).length >= 2 }
+    val visibleSuggestions = remember(suggestions, showSuggestions) {
+        if (showSuggestions) suggestions else emptyList()
+    }
     val showQuantity = newItem.isNotBlank() && (matched == null || matched.type == IngredientType.QUANTITY_TRACKED)
 
     Column(
@@ -563,7 +575,7 @@ private fun ShoppingScreen(
             singleLine = true
         )
         IngredientSuggestionList(
-            suggestions = suggestions,
+            suggestions = visibleSuggestions,
             onSelect = { newItem = it }
         )
 
