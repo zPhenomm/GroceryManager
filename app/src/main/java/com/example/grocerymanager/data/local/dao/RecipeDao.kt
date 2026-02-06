@@ -20,6 +20,9 @@ interface RecipeDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertRecipe(recipe: RecipeEntity): Long
 
+    @Query("DELETE FROM recipes WHERE id = :recipeId")
+    suspend fun deleteById(recipeId: Long): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRecipeIngredients(ingredients: List<RecipeIngredientEntity>)
 

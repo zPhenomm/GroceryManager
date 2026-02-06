@@ -137,6 +137,7 @@ private fun GroceryManagerApp() {
             MainTab.Recipes -> RecipesScreen(
                 recipes = recipes,
                 onAddRecipe = viewModel::requestAddRecipe,
+                onDeleteRecipe = viewModel::deleteRecipe,
                 onAddMissingToShopping = viewModel::addMissingIngredientsToShopping,
                 onCookRecipe = viewModel::cookRecipe,
                 suggestionProvider = viewModel::searchIngredientSuggestions,
@@ -274,6 +275,7 @@ private data class RecipeDraftIngredient(
 private fun RecipesScreen(
     recipes: List<RecipeUiModel>,
     onAddRecipe: (String, List<RecipeIngredientInput>) -> Unit,
+    onDeleteRecipe: (Long) -> Unit,
     onAddMissingToShopping: (Long) -> Unit,
     onCookRecipe: (Long) -> Unit,
     suggestionProvider: (String) -> kotlinx.coroutines.flow.Flow<List<IngredientSuggestion>>,
@@ -281,8 +283,24 @@ private fun RecipesScreen(
 ) {
     var recipeName by rememberSaveable { mutableStateOf("") }
     var nextRowId by rememberSaveable { mutableIntStateOf(2) }
+    var deleteRecipeId by rememberSaveable { mutableStateOf<Long?>(null) }
     val draftIngredients = remember {
         mutableStateListOf(RecipeDraftIngredient(id = 1, name = "", amountText = ""))
+    }
+    val deleteRecipeItem = remember(recipes, deleteRecipeId) {
+        deleteRecipeId?.let { id -> recipes.firstOrNull { it.recipeId == id } }
+    }
+
+    deleteRecipeItem?.let { recipe ->
+        ConfirmDeleteDialog(
+            title = "Delete recipe",
+            message = "Delete ${recipe.name}?",
+            onConfirm = {
+                onDeleteRecipe(recipe.recipeId)
+                deleteRecipeId = null
+            },
+            onDismiss = { deleteRecipeId = null }
+        )
     }
 
     Column(
@@ -372,6 +390,7 @@ private fun RecipesScreen(
                 items(recipes, key = { it.recipeId }) { recipe ->
                     RecipeCard(
                         model = recipe,
+                        onDeleteRecipe = { deleteRecipeId = recipe.recipeId },
                         onAddMissingToShopping = { onAddMissingToShopping(recipe.recipeId) },
                         onCookRecipe = { onCookRecipe(recipe.recipeId) }
                     )
@@ -439,6 +458,7 @@ private fun RecipeIngredientRow(
 @Composable
 private fun RecipeCard(
     model: RecipeUiModel,
+    onDeleteRecipe: () -> Unit,
     onAddMissingToShopping: () -> Unit,
     onCookRecipe: () -> Unit
 ) {
@@ -479,8 +499,13 @@ private fun RecipeCard(
 
             if (isCookable) {
                 Text("Cookable with current storage.")
-                Button(onClick = onCookRecipe) {
-                    Text("Cooked")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onCookRecipe) {
+                        Text("Cooked")
+                    }
+                    TextButton(onClick = onDeleteRecipe) {
+                        Text("Delete")
+                    }
                 }
             } else {
                 Text(
@@ -490,8 +515,13 @@ private fun RecipeCard(
                         }
                     }"
                 )
-                Button(onClick = onAddMissingToShopping) {
-                    Text("Add missing to shopping list")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onAddMissingToShopping) {
+                        Text("Add missing to shopping list")
+                    }
+                    TextButton(onClick = onDeleteRecipe) {
+                        Text("Delete")
+                    }
                 }
             }
         }
@@ -656,6 +686,7 @@ private fun IngredientsScreen(
     editingItem?.let { item ->
         EditIngredientDialog(
             ingredient = item,
+            categorySuggestions = categories.map { it.name },
             onConfirm = { type, category ->
                 onUpdateIngredient(item.ingredientId, type, category)
                 editingIngredientId = null
@@ -810,11 +841,22 @@ private fun ConfirmDeleteDialog(
 @Composable
 private fun EditIngredientDialog(
     ingredient: IngredientUiItem,
+    categorySuggestions: List<String>,
     onConfirm: (IngredientType, String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var selectedType by remember(ingredient.ingredientId) { mutableStateOf(ingredient.type) }
     var category by remember(ingredient.ingredientId) { mutableStateOf(ingredient.category) }
+    val filteredCategorySuggestions = remember(category, categorySuggestions) {
+        val categoryKey = NameNormalizer.nameKey(category)
+        if (categoryKey.length < 2) {
+            return@remember emptyList()
+        }
+        categorySuggestions
+            .filter { NameNormalizer.nameKey(it).startsWith(categoryKey) }
+            .filter { NameNormalizer.nameKey(it) != categoryKey }
+            .take(6)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -827,6 +869,10 @@ private fun EditIngredientDialog(
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Category") },
                     singleLine = true
+                )
+                CategorySuggestionList(
+                    suggestions = filteredCategorySuggestions,
+                    onSelect = { category = it }
                 )
                 IngredientTypeSelector(
                     selectedType = selectedType,

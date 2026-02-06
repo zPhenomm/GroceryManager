@@ -104,6 +104,16 @@ class GroceryRepositoryInstrumentedTest {
     }
 
     @Test
+    fun delete_recipe_removes_it_from_recipe_list() = runBlocking {
+        val omelet = repository.observeRecipes().first().first { it.name == "Omelet" }
+        val deleted = repository.deleteRecipe(omelet.recipeId)
+        assertTrue(deleted)
+
+        val recipes = repository.observeRecipes().first()
+        assertFalse(recipes.any { it.name == "Omelet" })
+    }
+
+    @Test
     fun cook_recipe_subtracts_tracked_ingredients_and_removes_when_zero() = runBlocking {
         repository.addStorageItem("Eggs", 1.0)
         repository.addStorageItem("Salt", null)

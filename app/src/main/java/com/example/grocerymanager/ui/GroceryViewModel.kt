@@ -173,6 +173,12 @@ class GroceryViewModel(
         }
     }
 
+    fun deleteRecipe(recipeId: Long) {
+        viewModelScope.launch {
+            repository.deleteRecipe(recipeId)
+        }
+    }
+
     fun addMissingIngredientsToShopping(recipeId: Long) {
         viewModelScope.launch {
             repository.addMissingIngredientsToShopping(recipeId)

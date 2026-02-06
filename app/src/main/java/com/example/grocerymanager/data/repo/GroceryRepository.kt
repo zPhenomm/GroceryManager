@@ -30,6 +30,7 @@ interface GroceryRepository {
     suspend fun deleteIngredient(ingredientId: Long): Boolean
     suspend fun deleteCategory(category: String): Boolean
     suspend fun addRecipe(name: String, ingredients: List<RecipeIngredientInput>): Boolean
+    suspend fun deleteRecipe(recipeId: Long): Boolean
     suspend fun addMissingIngredientsToShopping(recipeId: Long)
     suspend fun cookRecipe(recipeId: Long): Boolean
     suspend fun addShoppingItem(
@@ -310,6 +311,10 @@ class GroceryRepositoryImpl(
             recipeDao.insertRecipeIngredients(recipeIngredients)
             true
         }
+    }
+
+    override suspend fun deleteRecipe(recipeId: Long): Boolean {
+        return recipeDao.deleteById(recipeId) > 0
     }
 
     override suspend fun addMissingIngredientsToShopping(recipeId: Long) {
