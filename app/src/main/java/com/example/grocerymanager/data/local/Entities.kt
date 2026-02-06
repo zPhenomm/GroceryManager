@@ -60,9 +60,11 @@ data class RecipeEntity(
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index(value = ["recipeId", "ingredientId"], unique = true)]
+    indices = [
+        Index(value = ["recipeId", "ingredientId"], unique = true),
+        Index(value = ["ingredientId"])
+    ]
 )
-// TODO: [ksp] C:/Users/maxma/AndroidStudioProjects/GroceryManager/app/src/main/java/com/example/grocerymanager/data/local/Entities.kt:65: ingredientId column references a foreign key but it is not part of an index. This may trigger full table scans whenever parent table is modified so you are highly advised to create an index that covers this column.
 data class RecipeIngredientEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val recipeId: Long,

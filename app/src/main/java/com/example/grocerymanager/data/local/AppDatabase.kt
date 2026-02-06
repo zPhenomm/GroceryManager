@@ -19,7 +19,7 @@ import com.example.grocerymanager.data.local.dao.StorageDao
         RecipeIngredientEntity::class,
         ShoppingItemEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(RoomConverters::class)
@@ -45,6 +45,7 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 "grocery_manager.db"
             )
+                .fallbackToDestructiveMigration(dropAllTables = true)
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         super.onCreate(db)

@@ -737,8 +737,11 @@ private fun NewIngredientDialog(
     var category by remember(ingredientName) { mutableStateOf("") }
     val filteredCategorySuggestions = remember(category, categorySuggestions) {
         val categoryKey = NameNormalizer.nameKey(category)
+        if (categoryKey.length < 2) {
+            return@remember emptyList()
+        }
         categorySuggestions
-            .filter { categoryKey.isBlank() || NameNormalizer.nameKey(it).startsWith(categoryKey) }
+            .filter { NameNormalizer.nameKey(it).startsWith(categoryKey) }
             .filter { NameNormalizer.nameKey(it) != categoryKey }
             .take(6)
     }
