@@ -8,11 +8,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -171,14 +174,17 @@ private fun StorageScreen(
 ) {
     var newItem by rememberSaveable { mutableStateOf("") }
     var amountText by rememberSaveable { mutableStateOf("") }
-    val storageKeys = remember(storageItems) {
-        storageItems.map { NameNormalizer.nameKey(it.name) }.toSet()
+    val presenceOnlyKeysInStorage = remember(storageItems) {
+        storageItems
+            .filter { it.type == IngredientType.PRESENCE_ONLY }
+            .map { NameNormalizer.nameKey(it.name) }
+            .toSet()
     }
     val suggestionsFlow = remember(newItem) { suggestionProvider(newItem) }
     val suggestions by suggestionsFlow.collectAsState(initial = emptyList())
     val matched = suggestions.firstOrNull { NameNormalizer.nameKey(it.name) == NameNormalizer.nameKey(newItem) }
-    val filteredSuggestions = remember(suggestions, storageKeys) {
-        suggestions.filter { NameNormalizer.nameKey(it.name) !in storageKeys }
+    val filteredSuggestions = remember(suggestions, presenceOnlyKeysInStorage) {
+        suggestions.filter { NameNormalizer.nameKey(it.name) !in presenceOnlyKeysInStorage }
     }
     val showAmount = newItem.isNotBlank() && (matched == null || matched.type == IngredientType.QUANTITY_TRACKED)
 
@@ -504,6 +510,7 @@ private fun ShoppingScreen(
     var newItem by rememberSaveable { mutableStateOf("") }
     var quantityText by rememberSaveable { mutableStateOf("") }
     val hasBought = shoppingItems.any { it.isBought }
+    val firstBoughtIndex = shoppingItems.indexOfFirst { it.isBought }
     val suggestionsFlow = remember(newItem) { suggestionProvider(newItem) }
     val suggestions by suggestionsFlow.collectAsState(initial = emptyList())
     val matched = suggestions.firstOrNull { NameNormalizer.nameKey(it.name) == NameNormalizer.nameKey(newItem) }
@@ -563,7 +570,13 @@ private fun ShoppingScreen(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(shoppingItems, key = { it.ingredientId }) { item ->
+                itemsIndexed(
+                    items = shoppingItems,
+                    key = { _, item -> item.ingredientId }
+                ) { index, item ->
+                    if (index == firstBoughtIndex && index > 0) {
+                        Spacer(modifier = Modifier.height(24.dp))
+                    }
                     OutlinedCard {
                         Row(
                             modifier = Modifier
@@ -823,7 +836,7 @@ private fun IngredientSuggestionList(
                     onClick = { onSelect(suggestion.name) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("${suggestion.name} (${suggestion.type.readableLabel()}, ${suggestion.category})")
+                    Text("${suggestion.name} (${suggestion.category})")
                 }
             }
         }
@@ -880,7 +893,7 @@ private fun formatAmount(amount: Double?): String {
 
 private fun IngredientType.readableLabel(): String {
     return when (this) {
-        IngredientType.QUANTITY_TRACKED -> "quantity-tracked"
-        IngredientType.PRESENCE_ONLY -> "presence-only"
+        IngredientType.QUANTITY_TRACKED -> "quantity"
+        IngredientType.PRESENCE_ONLY -> "presence"
     }
 }
