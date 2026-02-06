@@ -159,6 +159,12 @@ class GroceryViewModel(
         }
     }
 
+    fun cookRecipe(recipeId: Long) {
+        viewModelScope.launch {
+            repository.cookRecipe(recipeId)
+        }
+    }
+
     fun updateIngredientMetadata(
         ingredientId: Long,
         newType: IngredientType,

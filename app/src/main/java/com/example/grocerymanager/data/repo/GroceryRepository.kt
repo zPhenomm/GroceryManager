@@ -28,6 +28,7 @@ interface GroceryRepository {
     suspend fun removeStorageItem(ingredientId: Long)
     suspend fun addRecipe(name: String, ingredients: List<RecipeIngredientInput>): Boolean
     suspend fun addMissingIngredientsToShopping(recipeId: Long)
+    suspend fun cookRecipe(recipeId: Long): Boolean
     suspend fun addShoppingItem(
         name: String,
         quantity: Double?,
@@ -202,7 +203,7 @@ class GroceryRepositoryImpl(
                 }
 
                 IngredientType.QUANTITY_TRACKED -> {
-                    val delta = positiveOrDefault(amount, 1.0)
+                    val delta = positiveOrDefault(amount)
                     val existing = storageDao.findByIngredientId(ingredient.id)?.amount ?: 0.0
                     storageDao.upsert(
                         StorageEntryEntity(
@@ -235,7 +236,7 @@ class GroceryRepositoryImpl(
                 val ingredient = ensureIngredient(input.name, null) ?: return@withTransaction false
                 val required = when (ingredient.type) {
                     IngredientType.PRESENCE_ONLY -> null
-                    IngredientType.QUANTITY_TRACKED -> positiveOrDefault(input.requiredAmount, 1.0)
+                    IngredientType.QUANTITY_TRACKED -> positiveOrDefault(input.requiredAmount)
                 }
                 resolved += ingredient to required
             }
@@ -316,6 +317,56 @@ class GroceryRepositoryImpl(
         }
     }
 
+    override suspend fun cookRecipe(recipeId: Long): Boolean {
+        return db.withTransaction {
+            val recipeRows = recipeDao.getRecipeIngredientRows(recipeId)
+            if (recipeRows.isEmpty()) return@withTransaction false
+
+            val storageByIngredient = storageDao.getStorageRows().associateBy { it.ingredientId }
+
+            // Validate recipe can be cooked with current storage.
+            for (row in recipeRows) {
+                when (row.type) {
+                    IngredientType.PRESENCE_ONLY -> {
+                        if (storageByIngredient[row.ingredientId] == null) {
+                            return@withTransaction false
+                        }
+                    }
+
+                    IngredientType.QUANTITY_TRACKED -> {
+                        val required = row.requiredAmount ?: 1.0
+                        val available = storageByIngredient[row.ingredientId]?.amount ?: 0.0
+                        if (available + EPSILON < required) {
+                            return@withTransaction false
+                        }
+                    }
+                }
+            }
+
+            // Subtract quantity-tracked ingredients from storage.
+            for (row in recipeRows) {
+                if (row.type != IngredientType.QUANTITY_TRACKED) continue
+
+                val required = row.requiredAmount ?: 1.0
+                val currentAmount = storageDao.findByIngredientId(row.ingredientId)?.amount ?: 0.0
+                val updatedAmount = currentAmount - required
+
+                if (updatedAmount > EPSILON) {
+                    storageDao.upsert(
+                        StorageEntryEntity(
+                            ingredientId = row.ingredientId,
+                            amount = updatedAmount
+                        )
+                    )
+                } else {
+                    storageDao.deleteByIngredientId(row.ingredientId)
+                }
+            }
+
+            true
+        }
+    }
+
     override suspend fun addShoppingItem(
         name: String,
         quantity: Double?,
@@ -328,7 +379,7 @@ class GroceryRepositoryImpl(
             val mergedQuantity = when (ingredient.type) {
                 IngredientType.PRESENCE_ONLY -> null
                 IngredientType.QUANTITY_TRACKED ->
-                    (existing?.quantity ?: 0.0) + positiveOrDefault(quantity, 1.0)
+                    (existing?.quantity ?: 0.0) + positiveOrDefault(quantity)
             }
 
             shoppingDao.upsert(
@@ -363,7 +414,7 @@ class GroceryRepositoryImpl(
                     }
 
                     IngredientType.QUANTITY_TRACKED -> {
-                        val delta = positiveOrDefault(row.quantity, 1.0)
+                        val delta = positiveOrDefault(row.quantity)
                         val existing = storageDao.findByIngredientId(row.ingredientId)?.amount ?: 0.0
                         storageDao.upsert(
                             StorageEntryEntity(
@@ -445,10 +496,9 @@ class GroceryRepositoryImpl(
         }
     }
 
-    //TODO: Value of parameter 'defaultValue' is always '1.0'
-    private fun positiveOrDefault(value: Double?, defaultValue: Double): Double {
-        val candidate = value ?: defaultValue
-        return if (candidate > 0.0) candidate else defaultValue
+    private fun positiveOrDefault(value: Double?): Double {
+        val candidate = value ?: 1.0
+        return if (candidate > 0.0) candidate else 1.0
     }
 
     private fun IngredientEntity.toUiItem(): IngredientUiItem {

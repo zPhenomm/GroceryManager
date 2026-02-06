@@ -13,12 +13,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
@@ -38,6 +40,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -56,6 +59,8 @@ import com.example.grocerymanager.ui.GroceryViewModel
 import com.example.grocerymanager.ui.MainTab
 import com.example.grocerymanager.ui.theme.GroceryManagerTheme
 import kotlin.math.abs
+import java.util.Locale
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -80,10 +85,18 @@ private fun GroceryManagerApp() {
     val shoppingItems by viewModel.shoppingItems.collectAsState()
     val ingredients by viewModel.ingredients.collectAsState()
     val pendingPrompt by viewModel.pendingPrompt.collectAsState()
+    val knownCategories = remember(ingredients) {
+        ingredients
+            .map { NameNormalizer.normalizeName(it.category) }
+            .filter { it.isNotBlank() }
+            .distinctBy { NameNormalizer.nameKey(it) }
+            .sortedBy { it.lowercase() }
+    }
 
     pendingPrompt?.let { prompt ->
         NewIngredientDialog(
             ingredientName = prompt.ingredientName,
+            categorySuggestions = knownCategories,
             onConfirm = { type, category ->
                 viewModel.confirmPendingIngredient(
                     NewIngredientMetaInput(
@@ -124,6 +137,7 @@ private fun GroceryManagerApp() {
                 recipes = recipes,
                 onAddRecipe = viewModel::requestAddRecipe,
                 onAddMissingToShopping = viewModel::addMissingIngredientsToShopping,
+                onCookRecipe = viewModel::cookRecipe,
                 suggestionProvider = viewModel::searchIngredientSuggestions,
                 modifier = Modifier.padding(padding)
             )
@@ -157,9 +171,15 @@ private fun StorageScreen(
 ) {
     var newItem by rememberSaveable { mutableStateOf("") }
     var amountText by rememberSaveable { mutableStateOf("") }
+    val storageKeys = remember(storageItems) {
+        storageItems.map { NameNormalizer.nameKey(it.name) }.toSet()
+    }
     val suggestionsFlow = remember(newItem) { suggestionProvider(newItem) }
     val suggestions by suggestionsFlow.collectAsState(initial = emptyList())
     val matched = suggestions.firstOrNull { NameNormalizer.nameKey(it.name) == NameNormalizer.nameKey(newItem) }
+    val filteredSuggestions = remember(suggestions, storageKeys) {
+        suggestions.filter { NameNormalizer.nameKey(it.name) !in storageKeys }
+    }
     val showAmount = newItem.isNotBlank() && (matched == null || matched.type == IngredientType.QUANTITY_TRACKED)
 
     Column(
@@ -178,7 +198,7 @@ private fun StorageScreen(
             singleLine = true
         )
         IngredientSuggestionList(
-            suggestions = suggestions,
+            suggestions = filteredSuggestions,
             onSelect = { newItem = it }
         )
 
@@ -248,6 +268,7 @@ private fun RecipesScreen(
     recipes: List<RecipeUiModel>,
     onAddRecipe: (String, List<RecipeIngredientInput>) -> Unit,
     onAddMissingToShopping: (Long) -> Unit,
+    onCookRecipe: (Long) -> Unit,
     suggestionProvider: (String) -> kotlinx.coroutines.flow.Flow<List<IngredientSuggestion>>,
     modifier: Modifier = Modifier
 ) {
@@ -344,7 +365,8 @@ private fun RecipesScreen(
                 items(recipes, key = { it.recipeId }) { recipe ->
                     RecipeCard(
                         model = recipe,
-                        onAddMissingToShopping = { onAddMissingToShopping(recipe.recipeId) }
+                        onAddMissingToShopping = { onAddMissingToShopping(recipe.recipeId) },
+                        onCookRecipe = { onCookRecipe(recipe.recipeId) }
                     )
                 }
             }
@@ -410,8 +432,11 @@ private fun RecipeIngredientRow(
 @Composable
 private fun RecipeCard(
     model: RecipeUiModel,
-    onAddMissingToShopping: () -> Unit
+    onAddMissingToShopping: () -> Unit,
+    onCookRecipe: () -> Unit
 ) {
+    val isCookable = model.missing.isEmpty()
+
     ElevatedCard {
         Column(
             modifier = Modifier
@@ -419,7 +444,20 @@ private fun RecipeCard(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(model.name, fontWeight = FontWeight.SemiBold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(model.name, fontWeight = FontWeight.SemiBold)
+                if (isCookable) {
+                    Text(
+                        text = "\u2713",
+                        color = Color(0xFF2E7D32),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
             Text(
                 "Ingredients: ${
                     model.ingredients.joinToString(", ") { ingredient ->
@@ -432,10 +470,10 @@ private fun RecipeCard(
                 }"
             )
 
-            if (model.missing.isEmpty()) {
+            if (isCookable) {
                 Text("Cookable with current storage.")
-                OutlinedButton(onClick = onAddMissingToShopping, enabled = false) {
-                    Text("All ingredients available")
+                Button(onClick = onCookRecipe) {
+                    Text("Cooked")
                 }
             } else {
                 Text(
@@ -569,7 +607,10 @@ private fun IngredientsScreen(
     modifier: Modifier = Modifier
 ) {
     var search by rememberSaveable { mutableStateOf("") }
-    var editingItem by remember { mutableStateOf<IngredientUiItem?>(null) }
+    var editingIngredientId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val editingItem = remember(ingredients, editingIngredientId) {
+        editingIngredientId?.let { id -> ingredients.firstOrNull { it.ingredientId == id } }
+    }
 
     val filtered = remember(ingredients, search) {
         if (search.isBlank()) {
@@ -588,9 +629,9 @@ private fun IngredientsScreen(
             ingredient = item,
             onConfirm = { type, category ->
                 onUpdateIngredient(item.ingredientId, type, category)
-                editingItem = null
+                editingIngredientId = null
             },
-            onDismiss = { editingItem = null }  //TODO: Assigned value is never read
+            onDismiss = { editingIngredientId = null }
         )
     }
 
@@ -631,7 +672,7 @@ private fun IngredientsScreen(
                                 Text("Type: ${item.type.readableLabel()}")
                                 Text("Category: ${item.category}")
                             }
-                            TextButton(onClick = { editingItem = item }) {
+                            TextButton(onClick = { editingIngredientId = item.ingredientId }) {
                                 Text("Edit")
                             }
                         }
@@ -688,11 +729,19 @@ private fun EditIngredientDialog(
 @Composable
 private fun NewIngredientDialog(
     ingredientName: String,
+    categorySuggestions: List<String>,
     onConfirm: (IngredientType, String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var selectedType by remember(ingredientName) { mutableStateOf(IngredientType.QUANTITY_TRACKED) }
     var category by remember(ingredientName) { mutableStateOf("") }
+    val filteredCategorySuggestions = remember(category, categorySuggestions) {
+        val categoryKey = NameNormalizer.nameKey(category)
+        categorySuggestions
+            .filter { categoryKey.isBlank() || NameNormalizer.nameKey(it).startsWith(categoryKey) }
+            .filter { NameNormalizer.nameKey(it) != categoryKey }
+            .take(6)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -706,6 +755,10 @@ private fun NewIngredientDialog(
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Category") },
                     singleLine = true
+                )
+                CategorySuggestionList(
+                    suggestions = filteredCategorySuggestions,
+                    onSelect = { category = it }
                 )
                 IngredientTypeSelector(
                     selectedType = selectedType,
@@ -734,18 +787,21 @@ private fun IngredientTypeSelector(
     selectedType: IngredientType,
     onTypeSelected: (IngredientType) -> Unit
 ) {
+    val selectedBorder = BorderStroke(width = 2.dp, color = MaterialTheme.colorScheme.primary)
+    val defaultBorder = BorderStroke(width = 1.dp, color = MaterialTheme.colorScheme.outline)
+
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(
             onClick = { onTypeSelected(IngredientType.QUANTITY_TRACKED) },
-            enabled = selectedType != IngredientType.QUANTITY_TRACKED
+            border = if (selectedType == IngredientType.QUANTITY_TRACKED) selectedBorder else defaultBorder
         ) {
-            Text("Quantity tracked")
+            Text("Quantity")
         }
         OutlinedButton(
             onClick = { onTypeSelected(IngredientType.PRESENCE_ONLY) },
-            enabled = selectedType != IngredientType.PRESENCE_ONLY
+            border = if (selectedType == IngredientType.PRESENCE_ONLY) selectedBorder else defaultBorder
         ) {
-            Text("Presence only")
+            Text("Presence")
         }
     }
 }
@@ -765,6 +821,27 @@ private fun IngredientSuggestionList(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("${suggestion.name} (${suggestion.type.readableLabel()}, ${suggestion.category})")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategorySuggestionList(
+    suggestions: List<String>,
+    onSelect: (String) -> Unit
+) {
+    if (suggestions.isEmpty()) return
+
+    OutlinedCard {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            suggestions.forEach { suggestion ->
+                TextButton(
+                    onClick = { onSelect(suggestion) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(suggestion)
                 }
             }
         }
@@ -794,8 +871,7 @@ private fun formatAmount(amount: Double?): String {
     return if (abs(amount - asLong) < 1e-9) {
         asLong.toLong().toString()
     } else {
-        //TODO: Implicitly using the default locale is a common source of bugs: Use String.format(Locale, ...) instead
-        String.format("%.2f", amount).trimEnd('0').trimEnd('.')
+        String.format(Locale.US, "%.2f", amount).trimEnd('0').trimEnd('.')
     }
 }
 

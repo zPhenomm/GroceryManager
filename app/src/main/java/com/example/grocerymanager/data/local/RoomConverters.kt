@@ -2,7 +2,7 @@ package com.example.grocerymanager.data.local
 
 import androidx.room.TypeConverter
 
-//TODO: these functions are never used?
+@Suppress("unused")
 class RoomConverters {
     @TypeConverter
     fun ingredientTypeToString(type: IngredientType): String = type.name

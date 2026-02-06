@@ -104,6 +104,25 @@ class GroceryRepositoryInstrumentedTest {
     }
 
     @Test
+    fun cook_recipe_subtracts_tracked_ingredients_and_removes_when_zero() = runBlocking {
+        repository.addStorageItem("Eggs", 1.0)
+        repository.addStorageItem("Salt", null)
+
+        val omelet = repository.observeRecipes().first().first { it.name == "Omelet" }
+        val cooked = repository.cookRecipe(omelet.recipeId)
+        assertTrue(cooked)
+
+        val storage = repository.observeStorage().first()
+        val eggs = storage.firstOrNull { it.name == "Eggs" }
+        val milk = storage.firstOrNull { it.name == "Milk" }
+        val salt = storage.firstOrNull { it.name == "Salt" }
+
+        assertNull(eggs)
+        assertNull(milk)
+        assertNotNull(salt)
+    }
+
+    @Test
     fun move_bought_to_storage_increases_quantity_and_clears_bought_items() = runBlocking {
         repository.addShoppingItem("Eggs", 2.0)
         val eggsShopping = repository.observeShopping().first().first { it.name == "Eggs" }
