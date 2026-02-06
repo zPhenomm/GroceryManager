@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.grocerymanager.data.NameNormalizer
 import com.example.grocerymanager.data.local.IngredientType
+import com.example.grocerymanager.data.repo.CategoryUiItem
 import com.example.grocerymanager.data.repo.IngredientSuggestion
 import com.example.grocerymanager.data.repo.IngredientUiItem
 import com.example.grocerymanager.data.repo.NewIngredientMetaInput
@@ -87,13 +88,10 @@ private fun GroceryManagerApp() {
     val recipes by viewModel.recipes.collectAsState()
     val shoppingItems by viewModel.shoppingItems.collectAsState()
     val ingredients by viewModel.ingredients.collectAsState()
+    val categories by viewModel.categories.collectAsState()
     val pendingPrompt by viewModel.pendingPrompt.collectAsState()
-    val knownCategories = remember(ingredients) {
-        ingredients
-            .map { NameNormalizer.normalizeName(it.category) }
-            .filter { it.isNotBlank() }
-            .distinctBy { NameNormalizer.nameKey(it) }
-            .sortedBy { it.lowercase() }
+    val knownCategories = remember(categories) {
+        categories.map { it.name }
     }
 
     pendingPrompt?.let { prompt ->
@@ -157,7 +155,10 @@ private fun GroceryManagerApp() {
 
             MainTab.Ingredients -> IngredientsScreen(
                 ingredients = ingredients,
+                categories = categories,
                 onUpdateIngredient = viewModel::updateIngredientMetadata,
+                onDeleteIngredient = viewModel::deleteIngredient,
+                onDeleteCategory = viewModel::deleteCategory,
                 modifier = Modifier.padding(padding)
             )
         }
@@ -616,24 +617,39 @@ private fun ShoppingScreen(
 @Composable
 private fun IngredientsScreen(
     ingredients: List<IngredientUiItem>,
+    categories: List<CategoryUiItem>,
     onUpdateIngredient: (Long, IngredientType, String) -> Unit,
+    onDeleteIngredient: (Long) -> Unit,
+    onDeleteCategory: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var search by rememberSaveable { mutableStateOf("") }
     var editingIngredientId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var deleteIngredientId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var deleteCategoryName by rememberSaveable { mutableStateOf<String?>(null) }
     val editingItem = remember(ingredients, editingIngredientId) {
         editingIngredientId?.let { id -> ingredients.firstOrNull { it.ingredientId == id } }
     }
+    val deleteIngredientItem = remember(ingredients, deleteIngredientId) {
+        deleteIngredientId?.let { id -> ingredients.firstOrNull { it.ingredientId == id } }
+    }
+    val searchKey = remember(search) { NameNormalizer.nameKey(search) }
 
-    val filtered = remember(ingredients, search) {
-        if (search.isBlank()) {
+    val filteredIngredients = remember(ingredients, searchKey) {
+        if (searchKey.isBlank()) {
             ingredients
         } else {
-            val key = NameNormalizer.nameKey(search)
             ingredients.filter {
-                NameNormalizer.nameKey(it.name).contains(key) ||
-                    NameNormalizer.nameKey(it.category).contains(key)
+                NameNormalizer.nameKey(it.name).contains(searchKey) ||
+                    NameNormalizer.nameKey(it.category).contains(searchKey)
             }
+        }
+    }
+    val filteredCategories = remember(categories, searchKey) {
+        if (searchKey.isBlank()) {
+            categories
+        } else {
+            categories.filter { NameNormalizer.nameKey(it.name).contains(searchKey) }
         }
     }
 
@@ -645,6 +661,28 @@ private fun IngredientsScreen(
                 editingIngredientId = null
             },
             onDismiss = { editingIngredientId = null }
+        )
+    }
+    deleteIngredientItem?.let { item ->
+        ConfirmDeleteDialog(
+            title = "Delete ingredient",
+            message = "Delete ${item.name}? This removes it from storage, recipes and shopping list.",
+            onConfirm = {
+                onDeleteIngredient(item.ingredientId)
+                deleteIngredientId = null
+            },
+            onDismiss = { deleteIngredientId = null }
+        )
+    }
+    deleteCategoryName?.let { categoryName ->
+        ConfirmDeleteDialog(
+            title = "Delete category",
+            message = "Delete $categoryName? Ingredients in this category will be moved to $DEFAULT_CATEGORY_NAME.",
+            onConfirm = {
+                onDeleteCategory(categoryName)
+                deleteCategoryName = null
+            },
+            onDismiss = { deleteCategoryName = null }
         )
     }
 
@@ -664,29 +702,78 @@ private fun IngredientsScreen(
             singleLine = true
         )
 
-        if (filtered.isEmpty()) {
-            EmptyState("No ingredients found.")
+        if (filteredIngredients.isEmpty() && filteredCategories.isEmpty()) {
+            EmptyState("No ingredients or categories found.")
         } else {
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(filtered, key = { it.ingredientId }) { item ->
-                    OutlinedCard {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(item.name, fontWeight = FontWeight.SemiBold)
-                                Text("Type: ${item.type.readableLabel()}")
-                                Text("Category: ${item.category}")
+                item(key = "ingredients_header") {
+                    Text("Ingredients", fontWeight = FontWeight.SemiBold)
+                }
+
+                if (filteredIngredients.isEmpty()) {
+                    item(key = "ingredients_empty") { Text("No ingredients found.") }
+                } else {
+                    items(filteredIngredients, key = { it.ingredientId }) { item ->
+                        OutlinedCard {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(item.name, fontWeight = FontWeight.SemiBold)
+                                    Text("Type: ${item.type.readableLabel()}")
+                                    Text("Category: ${item.category}")
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(onClick = { editingIngredientId = item.ingredientId }) {
+                                        Text("Edit")
+                                    }
+                                    TextButton(onClick = { deleteIngredientId = item.ingredientId }) {
+                                        Text("Delete")
+                                    }
+                                }
                             }
-                            TextButton(onClick = { editingIngredientId = item.ingredientId }) {
-                                Text("Edit")
+                        }
+                    }
+                }
+
+                item(key = "categories_spacer") {
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                item(key = "categories_header") {
+                    Text("Categories", fontWeight = FontWeight.SemiBold)
+                }
+
+                if (filteredCategories.isEmpty()) {
+                    item(key = "categories_empty") { Text("No categories found.") }
+                } else {
+                    items(filteredCategories, key = { NameNormalizer.nameKey(it.name) }) { category ->
+                        val isDefaultCategory =
+                            NameNormalizer.nameKey(category.name) == NameNormalizer.nameKey(DEFAULT_CATEGORY_NAME)
+                        OutlinedCard {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(category.name, fontWeight = FontWeight.SemiBold)
+                                    Text("${category.ingredientCount} ingredient(s)")
+                                }
+                                TextButton(
+                                    onClick = { deleteCategoryName = category.name },
+                                    enabled = !isDefaultCategory
+                                ) {
+                                    Text("Delete")
+                                }
                             }
                         }
                     }
@@ -694,6 +781,30 @@ private fun IngredientsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun ConfirmDeleteDialog(
+    title: String,
+    message: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(message) },
+        confirmButton = {
+            Button(onClick = onConfirm) {
+                Text("Delete")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable
@@ -897,3 +1008,5 @@ private fun IngredientType.readableLabel(): String {
         IngredientType.PRESENCE_ONLY -> "presence"
     }
 }
+
+private const val DEFAULT_CATEGORY_NAME = "Uncategorized"

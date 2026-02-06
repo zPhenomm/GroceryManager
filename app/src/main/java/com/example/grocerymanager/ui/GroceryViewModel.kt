@@ -9,6 +9,7 @@ import com.example.grocerymanager.data.local.AppDatabase
 import com.example.grocerymanager.data.local.IngredientType
 import com.example.grocerymanager.data.repo.GroceryRepository
 import com.example.grocerymanager.data.repo.GroceryRepositoryImpl
+import com.example.grocerymanager.data.repo.CategoryUiItem
 import com.example.grocerymanager.data.repo.IngredientSuggestion
 import com.example.grocerymanager.data.repo.IngredientUiItem
 import com.example.grocerymanager.data.repo.NewIngredientMetaInput
@@ -78,6 +79,13 @@ class GroceryViewModel(
             initialValue = emptyList()
         )
 
+    val categories: StateFlow<List<CategoryUiItem>> =
+        repository.observeCategories().stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
+
     private val _pendingPrompt = MutableStateFlow<PendingIngredientPrompt?>(null)
     val pendingPrompt: StateFlow<PendingIngredientPrompt?> = _pendingPrompt.asStateFlow()
 
@@ -110,6 +118,18 @@ class GroceryViewModel(
     fun removeStorageItem(ingredientId: Long) {
         viewModelScope.launch {
             repository.removeStorageItem(ingredientId)
+        }
+    }
+
+    fun deleteIngredient(ingredientId: Long) {
+        viewModelScope.launch {
+            repository.deleteIngredient(ingredientId)
+        }
+    }
+
+    fun deleteCategory(category: String) {
+        viewModelScope.launch {
+            repository.deleteCategory(category)
         }
     }
 

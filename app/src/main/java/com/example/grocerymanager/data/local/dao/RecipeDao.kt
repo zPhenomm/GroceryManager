@@ -55,4 +55,17 @@ interface RecipeDao {
         """
     )
     suspend fun setNullRequiredAmountsToDefault(ingredientId: Long)
+
+    @Query(
+        """
+        DELETE FROM recipes
+        WHERE id IN (
+            SELECT recipes.id
+            FROM recipes
+            LEFT JOIN recipe_ingredients ON recipes.id = recipe_ingredients.recipeId
+            WHERE recipe_ingredients.id IS NULL
+        )
+        """
+    )
+    suspend fun deleteRecipesWithoutIngredients()
 }

@@ -19,6 +19,7 @@ interface GroceryRepository {
     fun observeRecipes(): Flow<List<RecipeUiModel>>
     fun observeShopping(): Flow<List<ShoppingUiItem>>
     fun observeIngredients(): Flow<List<IngredientUiItem>>
+    fun observeCategories(): Flow<List<CategoryUiItem>>
     fun searchIngredientSuggestions(prefix: String): Flow<List<IngredientSuggestion>>
 
     suspend fun findIngredientByName(name: String): IngredientUiItem?
@@ -26,6 +27,8 @@ interface GroceryRepository {
 
     suspend fun addStorageItem(name: String, amount: Double?, newMeta: NewIngredientMetaInput? = null): Boolean
     suspend fun removeStorageItem(ingredientId: Long)
+    suspend fun deleteIngredient(ingredientId: Long): Boolean
+    suspend fun deleteCategory(category: String): Boolean
     suspend fun addRecipe(name: String, ingredients: List<RecipeIngredientInput>): Boolean
     suspend fun addMissingIngredientsToShopping(recipeId: Long)
     suspend fun cookRecipe(recipeId: Long): Boolean
@@ -160,6 +163,17 @@ class GroceryRepositoryImpl(
         }
     }
 
+    override fun observeCategories(): Flow<List<CategoryUiItem>> {
+        return ingredientDao.observeCategories().map { rows ->
+            rows.map {
+                CategoryUiItem(
+                    name = it.name,
+                    ingredientCount = it.ingredientCount.toInt()
+                )
+            }
+        }
+    }
+
     override fun searchIngredientSuggestions(prefix: String): Flow<List<IngredientSuggestion>> {
         val normalizedPrefix = NameNormalizer.nameKey(prefix)
         if (normalizedPrefix.isBlank()) return flowOf(emptyList())
@@ -220,6 +234,27 @@ class GroceryRepositoryImpl(
 
     override suspend fun removeStorageItem(ingredientId: Long) {
         storageDao.deleteByIngredientId(ingredientId)
+    }
+
+    override suspend fun deleteIngredient(ingredientId: Long): Boolean {
+        return db.withTransaction {
+            val deletedRows = ingredientDao.deleteById(ingredientId)
+            if (deletedRows <= 0) return@withTransaction false
+            recipeDao.deleteRecipesWithoutIngredients()
+            true
+        }
+    }
+
+    override suspend fun deleteCategory(category: String): Boolean {
+        val normalizedCategory = NameNormalizer.normalizeName(category)
+        if (normalizedCategory.isBlank()) return false
+
+        return db.withTransaction {
+            if (NameNormalizer.nameKey(normalizedCategory) == NameNormalizer.nameKey(UNCATEGORIZED)) {
+                return@withTransaction false
+            }
+            ingredientDao.replaceCategory(normalizedCategory, UNCATEGORIZED) > 0
+        }
     }
 
     override suspend fun addRecipe(name: String, ingredients: List<RecipeIngredientInput>): Boolean {
@@ -512,5 +547,6 @@ class GroceryRepositoryImpl(
 
     companion object {
         private const val EPSILON = 1e-9
+        private const val UNCATEGORIZED = "Uncategorized"
     }
 }

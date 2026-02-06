@@ -46,6 +46,11 @@ data class IngredientUiItem(
     val category: String
 )
 
+data class CategoryUiItem(
+    val name: String,
+    val ingredientCount: Int
+)
+
 data class IngredientSuggestion(
     val ingredientId: Long,
     val name: String,
