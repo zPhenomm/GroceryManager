@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -49,7 +50,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.grocerymanager.data.NameNormalizer
 import com.example.grocerymanager.data.local.IngredientType
@@ -200,7 +203,11 @@ private fun MainBottomBar(
     selectedTab: MainTab,
     onSelectTab: (MainTab) -> Unit
 ) {
-    Surface(shadowElevation = 3.dp, tonalElevation = 1.dp) {
+    Surface(
+        shadowElevation = 3.dp,
+        tonalElevation = 1.dp,
+        modifier = Modifier.navigationBarsPadding()
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -215,6 +222,12 @@ private fun MainBottomBar(
                 ) {
                     Text(
                         text = tab.title,
+                        style= MaterialTheme.typography.labelMedium.copy(
+                            fontSize = 11.5.sp
+                        ),
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                         color = if (isSelected) {
                             MaterialTheme.colorScheme.primary
                         } else {
