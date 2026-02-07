@@ -1,8 +1,10 @@
 package com.example.grocerymanager
 
+import android.app.Activity
 import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
@@ -25,12 +27,11 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -81,6 +82,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun GroceryManagerApp() {
     val context = LocalContext.current
+    val activity = context as? Activity
     val systemDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
     val sharedPreferences = remember(context) {
         context.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
@@ -94,6 +96,7 @@ private fun GroceryManagerApp() {
             }
         )
     }
+    var showExitDialog by rememberSaveable { mutableStateOf(false) }
     val viewModel: GroceryViewModel = viewModel(factory = GroceryViewModel.factory(context = context))
     val selectedTab by viewModel.selectedTab.collectAsState()
     val storageItems by viewModel.storageItems.collectAsState()
@@ -121,21 +124,28 @@ private fun GroceryManagerApp() {
             onDismiss = viewModel::dismissPendingIngredient
         )
     }
+    if (showExitDialog) {
+        ConfirmDeleteDialog(
+            title = "Exit app",
+            message = "Do you want to exit?",
+            confirmLabel = "Exit",
+            onConfirm = { activity?.finish() },
+            onDismiss = { showExitDialog = false }
+        )
+    }
+
+    BackHandler(enabled = !showExitDialog) {
+        showExitDialog = true
+    }
 
     GroceryManagerTheme(darkTheme = darkModeEnabled) {
         Scaffold(
             topBar = { CenterAlignedTopAppBar(title = { Text(selectedTab.title) }) },
             bottomBar = {
-                NavigationBar {
-                    MainTab.entries.forEach { tab ->
-                        NavigationBarItem(
-                            selected = selectedTab == tab,
-                            onClick = { viewModel.selectTab(tab) },
-                            icon = { Text(tab.shortLabel) },
-                            label = { Text(tab.title) }
-                        )
-                    }
-                }
+                MainBottomBar(
+                    selectedTab = selectedTab,
+                    onSelectTab = viewModel::selectTab
+                )
             }
         ) { padding ->
             when (selectedTab) {
@@ -180,6 +190,39 @@ private fun GroceryManagerApp() {
                     onDeleteCategory = viewModel::deleteCategory,
                     modifier = Modifier.padding(padding)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MainBottomBar(
+    selectedTab: MainTab,
+    onSelectTab: (MainTab) -> Unit
+) {
+    Surface(shadowElevation = 3.dp, tonalElevation = 1.dp) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MainTab.entries.forEach { tab ->
+                val isSelected = selectedTab == tab
+                TextButton(
+                    onClick = { onSelectTab(tab) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = tab.title,
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
             }
         }
     }
@@ -307,6 +350,7 @@ private fun RecipesScreen(
     var recipeName by rememberSaveable { mutableStateOf("") }
     var nextRowId by rememberSaveable { mutableIntStateOf(2) }
     var deleteRecipeId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var isCreatingRecipe by rememberSaveable { mutableStateOf(false) }
     val draftIngredients = remember {
         mutableStateListOf(RecipeDraftIngredient(id = 1, name = "", amountText = ""))
     }
@@ -326,98 +370,149 @@ private fun RecipesScreen(
         )
     }
 
+    if (isCreatingRecipe) {
+        RecipeCreationScreen(
+            recipeName = recipeName,
+            onRecipeNameChange = { recipeName = it },
+            draftIngredients = draftIngredients,
+            onIngredientChange = { index, updated -> draftIngredients[index] = updated },
+            onRemoveIngredient = { index -> draftIngredients.removeAt(index) },
+            onAddIngredientRow = {
+                draftIngredients.add(
+                    RecipeDraftIngredient(
+                        id = nextRowId,
+                        name = "",
+                        amountText = ""
+                    )
+                )
+                nextRowId += 1
+            },
+            onSubmit = {
+                val inputs = draftIngredients.mapNotNull {
+                    val normalized = NameNormalizer.normalizeName(it.name)
+                    if (normalized.isBlank()) {
+                        null
+                    } else {
+                        RecipeIngredientInput(
+                            name = normalized,
+                            requiredAmount = parsePositiveDouble(it.amountText)
+                        )
+                    }
+                }
+                onAddRecipe(recipeName, inputs)
+                recipeName = ""
+                draftIngredients.clear()
+                draftIngredients.add(RecipeDraftIngredient(id = 1, name = "", amountText = ""))
+                nextRowId = 2
+                isCreatingRecipe = false
+            },
+            onCancel = { isCreatingRecipe = false },
+            canSubmit = recipeName.isNotBlank() &&
+                draftIngredients.any { NameNormalizer.normalizeName(it.name).isNotBlank() },
+            suggestionProvider = suggestionProvider,
+            modifier = modifier
+        )
+    } else {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            //Text(
+            //    "Create recipes and check if they are cookable.",
+            //    fontWeight = FontWeight.SemiBold
+            //)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start
+            ) {
+                Button(onClick = { isCreatingRecipe = true }) {
+                    Text("Create recipe")
+                }
+            }
+
+            if (recipes.isEmpty()) {
+                EmptyState("No recipes yet.")
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(recipes, key = { it.recipeId }) { recipe ->
+                        RecipeCard(
+                            model = recipe,
+                            onDeleteRecipe = { deleteRecipeId = recipe.recipeId },
+                            onAddMissingToShopping = { onAddMissingToShopping(recipe.recipeId) },
+                            onCookRecipe = { onCookRecipe(recipe.recipeId) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecipeCreationScreen(
+    recipeName: String,
+    onRecipeNameChange: (String) -> Unit,
+    draftIngredients: List<RecipeDraftIngredient>,
+    onIngredientChange: (Int, RecipeDraftIngredient) -> Unit,
+    onRemoveIngredient: (Int) -> Unit,
+    onAddIngredientRow: () -> Unit,
+    onSubmit: () -> Unit,
+    onCancel: () -> Unit,
+    canSubmit: Boolean,
+    suggestionProvider: (String) -> kotlinx.coroutines.flow.Flow<List<IngredientSuggestion>>,
+    modifier: Modifier = Modifier
+) {
+    BackHandler(onBack = onCancel)
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("Create recipes and check if they are cookable.", fontWeight = FontWeight.SemiBold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Create recipe", fontWeight = FontWeight.SemiBold)
+            TextButton(onClick = onCancel) { Text("Back") }
+        }
 
-        OutlinedCard {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = recipeName,
-                    onValueChange = { recipeName = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Recipe name") },
-                    singleLine = true
+        OutlinedTextField(
+            value = recipeName,
+            onValueChange = onRecipeNameChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Recipe name") },
+            singleLine = true
+        )
+
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            itemsIndexed(draftIngredients, key = { _, row -> row.id }) { index, row ->
+                RecipeIngredientRow(
+                    row = row,
+                    canRemove = draftIngredients.size > 1,
+                    onRowChange = { updated -> onIngredientChange(index, updated) },
+                    onRemove = { onRemoveIngredient(index) },
+                    suggestionProvider = suggestionProvider
                 )
-
-                draftIngredients.forEachIndexed { index, row ->
-                    RecipeIngredientRow(
-                        row = row,
-                        canRemove = draftIngredients.size > 1,
-                        onRowChange = { updated -> draftIngredients[index] = updated },
-                        onRemove = { draftIngredients.removeAt(index) },
-                        suggestionProvider = suggestionProvider
-                    )
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = {
-                            draftIngredients.add(
-                                RecipeDraftIngredient(
-                                    id = nextRowId,
-                                    name = "",
-                                    amountText = ""
-                                )
-                            )
-                            nextRowId += 1
-                        }
-                    ) {
-                        Text("Add ingredient row")
-                    }
-
-                    Button(
-                        onClick = {
-                            val inputs = draftIngredients.mapNotNull {
-                                val normalized = NameNormalizer.normalizeName(it.name)
-                                if (normalized.isBlank()) {
-                                    null
-                                } else {
-                                    RecipeIngredientInput(
-                                        name = normalized,
-                                        requiredAmount = parsePositiveDouble(it.amountText)
-                                    )
-                                }
-                            }
-                            onAddRecipe(recipeName, inputs)
-                            recipeName = ""
-                            draftIngredients.clear()
-                            draftIngredients.add(RecipeDraftIngredient(id = 1, name = "", amountText = ""))
-                            nextRowId = 2
-                        },
-                        enabled = recipeName.isNotBlank() &&
-                            draftIngredients.any { NameNormalizer.normalizeName(it.name).isNotBlank() }
-                    ) {
-                        Text("Add recipe")
-                    }
-                }
             }
         }
 
-        if (recipes.isEmpty()) {
-            EmptyState("No recipes yet.")
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(recipes, key = { it.recipeId }) { recipe ->
-                    RecipeCard(
-                        model = recipe,
-                        onDeleteRecipe = { deleteRecipeId = recipe.recipeId },
-                        onAddMissingToShopping = { onAddMissingToShopping(recipe.recipeId) },
-                        onCookRecipe = { onCookRecipe(recipe.recipeId) }
-                    )
-                }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onAddIngredientRow) {
+                Text("Add ingredient row")
+            }
+            Button(onClick = onSubmit, enabled = canSubmit) {
+                Text("Add recipe")
             }
         }
     }
@@ -757,30 +852,30 @@ private fun IngredientsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text("Manage ingredient types and categories.", fontWeight = FontWeight.SemiBold)
-        OutlinedCard {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Dark mode", fontWeight = FontWeight.SemiBold)
-                    Text("Use dark colors across the app.")
-                }
-                Checkbox(
-                    checked = isDarkModeEnabled,
-                    onCheckedChange = onDarkModeChange
-                )
-            }
-        }
+        //OutlinedCard {
+        //    Row(
+        //        modifier = Modifier
+        //            .fillMaxWidth()
+        //            .padding(12.dp),
+        //        horizontalArrangement = Arrangement.SpaceBetween,
+        //        verticalAlignment = Alignment.CenterVertically
+        //    ) {
+        //        Column(modifier = Modifier.weight(1f)) {
+        //            Text("Dark mode", fontWeight = FontWeight.SemiBold)
+        //            Text("Use dark colors across the app.")
+        //        }
+        //        Checkbox(
+        //            checked = isDarkModeEnabled,
+        //            onCheckedChange = onDarkModeChange
+        //        )
+        //    }
+        //}
 
         OutlinedTextField(
             value = search,
             onValueChange = { search = it },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Search ingredients") },
+            label = { Text("Search ingredients/catgegories") },
             singleLine = true
         )
 
@@ -869,16 +964,19 @@ private fun IngredientsScreen(
 private fun ConfirmDeleteDialog(
     title: String,
     message: String,
+    confirmLabel: String = "Delete",
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    BackHandler(onBack = onDismiss)
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { Text(message) },
         confirmButton = {
             Button(onClick = onConfirm) {
-                Text("Delete")
+                Text(confirmLabel)
             }
         },
         dismissButton = {
@@ -896,6 +994,8 @@ private fun EditIngredientDialog(
     onConfirm: (IngredientType, String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    BackHandler(onBack = onDismiss)
+
     var selectedType by remember(ingredient.ingredientId) { mutableStateOf(ingredient.type) }
     var category by remember(ingredient.ingredientId) { mutableStateOf(ingredient.category) }
     val filteredCategorySuggestions = remember(category, categorySuggestions) {
@@ -954,6 +1054,8 @@ private fun NewIngredientDialog(
     onConfirm: (IngredientType, String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    BackHandler(onBack = onDismiss)
+
     var selectedType by remember(ingredientName) { mutableStateOf(IngredientType.QUANTITY_TRACKED) }
     var category by remember(ingredientName) { mutableStateOf("") }
     val filteredCategorySuggestions = remember(category, categorySuggestions) {
