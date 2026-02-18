@@ -21,6 +21,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -37,6 +41,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -51,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -89,6 +95,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun GroceryManagerApp() {
     val context = LocalContext.current
+    val layoutDirection = LocalLayoutDirection.current
     val activity = context as? Activity
     val showExitDialogState = rememberSaveable { mutableStateOf(false) }
     val isCreatingRecipeState = rememberSaveable { mutableStateOf(false) }
@@ -137,24 +144,43 @@ private fun GroceryManagerApp() {
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Text(selectedTab.title) },
+                    title = {
+                        Text(
+                            if (selectedTab == MainTab.Recipes && isCreatingRecipeState.value) {
+                                "Create recipe"
+                            } else {
+                                selectedTab.title
+                            }
+                        )
+                    },
                     actions = {
-                        if (selectedTab == MainTab.Recipes && !isCreatingRecipeState.value) {
-                            TextButton(onClick = { isCreatingRecipeState.value = true }) {
-                                Text(
-                                    text = "Create",
-                                    style = MaterialTheme.typography.labelLarge.copy(fontSize = 15.sp)
-                                )
+                        if (selectedTab == MainTab.Recipes) {
+                            if (isCreatingRecipeState.value) {
+                                TextButton(onClick = { isCreatingRecipeState.value = false }) {
+                                    Text(
+                                        text = "Back",
+                                        style = MaterialTheme.typography.labelLarge.copy(fontSize = 15.sp)
+                                    )
+                                }
+                            } else {
+                                TextButton(onClick = { isCreatingRecipeState.value = true }) {
+                                    Text(
+                                        text = "Create",
+                                        style = MaterialTheme.typography.labelLarge.copy(fontSize = 15.sp)
+                                    )
+                                }
                             }
                         }
                     }
                 )
             },
             bottomBar = {
-                MainBottomBar(
-                    selectedTab = selectedTab,
-                    onSelectTab = viewModel::selectTab
-                )
+                if (selectedTab != MainTab.Recipes || !isCreatingRecipeState.value) {
+                    MainBottomBar(
+                        selectedTab = selectedTab,
+                        onSelectTab = viewModel::selectTab
+                    )
+                }
             }
         ) { padding ->
             when (selectedTab) {
@@ -175,7 +201,16 @@ private fun GroceryManagerApp() {
                     isCreatingRecipe = isCreatingRecipeState.value,
                     onDoneCreatingRecipe = { isCreatingRecipeState.value = false },
                     suggestionProvider = viewModel::searchIngredientSuggestions,
-                    modifier = Modifier.padding(padding)
+                    modifier = if (isCreatingRecipeState.value) {
+                        Modifier.padding(
+                            start = padding.calculateStartPadding(layoutDirection),
+                            top = padding.calculateTopPadding(),
+                            end = padding.calculateEndPadding(layoutDirection),
+                            bottom = 0.dp
+                        )
+                    } else {
+                        Modifier.padding(padding)
+                    }
                 )
 
                 MainTab.Shopping -> ShoppingScreen(
@@ -275,7 +310,7 @@ private fun StorageScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 4.dp),
+            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 4.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         OutlinedTextField(
@@ -431,7 +466,7 @@ private fun RecipesScreen(
         Column(
             modifier = modifier
                 .fillMaxSize()
-                .padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 4.dp),
+                .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 4.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (recipes.isEmpty()) {
@@ -476,19 +511,10 @@ private fun RecipeCreationScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp)
-            .imePadding(),
+            .imePadding()
+            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 4.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Create recipe", fontWeight = FontWeight.SemiBold)
-            TextButton(onClick = onCancel) { Text("Back") }
-        }
-
         OutlinedTextField(
             value = recipeName,
             onValueChange = onRecipeNameChange,
@@ -518,8 +544,20 @@ private fun RecipeCreationScreen(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onAddIngredientRow) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                onClick = {
+                    onAddIngredientRow()
+                    coroutineScope.launch {
+                        ingredientListState.animateScrollToItem(draftIngredients.lastIndex)
+                    }
+                }
+            ) {
                 Text("Add ingredient row")
             }
             Button(onClick = onSubmit, enabled = canSubmit) {
@@ -538,6 +576,11 @@ private fun RecipeIngredientRow(
     onAnyFieldFocused: () -> Unit,
     suggestionProvider: (String) -> kotlinx.coroutines.flow.Flow<List<IngredientSuggestion>>
 ) {
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+    val coroutineScope = rememberCoroutineScope()
+    var isNameFieldFocused by remember { mutableStateOf(false) }
+    var isAmountFieldFocused by remember { mutableStateOf(false) }
+    val isAnyFieldFocused = isNameFieldFocused || isAmountFieldFocused
     val suggestionsFlow = remember(row.name) { suggestionProvider(row.name) }
     val suggestions by suggestionsFlow.collectAsState(initial = emptyList())
     val matched = suggestions.firstOrNull { NameNormalizer.nameKey(it.name) == NameNormalizer.nameKey(row.name) }
@@ -550,6 +593,7 @@ private fun RecipeIngredientRow(
     OutlinedCard {
         Column(
             modifier = Modifier
+                .bringIntoViewRequester(bringIntoViewRequester)
                 .fillMaxWidth()
                 .padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -565,7 +609,13 @@ private fun RecipeIngredientRow(
                     modifier = Modifier
                         .weight(1f)
                         .onFocusChanged {
-                            if (it.isFocused) onAnyFieldFocused()
+                            isNameFieldFocused = it.isFocused
+                            if (it.isFocused) {
+                                onAnyFieldFocused()
+                                coroutineScope.launch {
+                                    bringIntoViewRequester.bringIntoView()
+                                }
+                            }
                         },
                     label = { Text("Ingredient") },
                     singleLine = true
@@ -587,12 +637,25 @@ private fun RecipeIngredientRow(
                     modifier = Modifier
                         .fillMaxWidth()
                         .onFocusChanged {
-                            if (it.isFocused) onAnyFieldFocused()
+                            isAmountFieldFocused = it.isFocused
+                            if (it.isFocused) {
+                                onAnyFieldFocused()
+                                coroutineScope.launch {
+                                    bringIntoViewRequester.bringIntoView()
+                                }
+                            }
                         },
-                    label = { Text("Required amount (optional, default 1)") },
+                    label = { Text("Required amount (optional)") },
                     singleLine = true
                 )
             }
+        }
+    }
+
+    LaunchedEffect(isAnyFieldFocused, visibleSuggestions.size) {
+        if (isAnyFieldFocused && visibleSuggestions.isNotEmpty()) {
+            onAnyFieldFocused()
+            bringIntoViewRequester.bringIntoView()
         }
     }
 }
@@ -708,7 +771,7 @@ private fun ShoppingScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 4.dp),
+            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 4.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -729,7 +792,7 @@ private fun ShoppingScreen(
             }
 
             Button(onClick = onMoveBoughtToStorage, enabled = hasBought) {
-                Text("Move bought items to storage")
+                Text("Move items to storage")
             }
         }
 
@@ -935,7 +998,7 @@ private fun IngredientsScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 4.dp),
+            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 4.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         OutlinedTextField(
