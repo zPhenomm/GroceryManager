@@ -30,6 +30,11 @@ interface GroceryRepository {
     suspend fun deleteIngredient(ingredientId: Long): Boolean
     suspend fun deleteCategory(category: String): Boolean
     suspend fun addRecipe(name: String, ingredients: List<RecipeIngredientInput>): Boolean
+    suspend fun updateRecipe(
+        recipeId: Long,
+        name: String,
+        ingredients: List<RecipeIngredientInput>
+    ): Boolean
     suspend fun deleteRecipe(recipeId: Long): Boolean
     suspend fun addMissingIngredientsToShopping(recipeId: Long)
     suspend fun cookRecipe(recipeId: Long): Boolean
@@ -309,6 +314,66 @@ class GroceryRepositoryImpl(
             }
 
             recipeDao.insertRecipeIngredients(recipeIngredients)
+            true
+        }
+    }
+
+    override suspend fun updateRecipe(
+        recipeId: Long,
+        name: String,
+        ingredients: List<RecipeIngredientInput>
+    ): Boolean {
+        return db.withTransaction {
+            val existingRecipe = recipeDao.findById(recipeId) ?: return@withTransaction false
+            val normalizedName = NameNormalizer.normalizeName(name)
+            if (normalizedName.isBlank()) return@withTransaction false
+
+            val recipeWithSameName = recipeDao.findByNameKey(NameNormalizer.nameKey(normalizedName))
+            if (recipeWithSameName != null && recipeWithSameName.id != existingRecipe.id) {
+                return@withTransaction false
+            }
+
+            val resolved = mutableListOf<Pair<IngredientEntity, Double?>>()
+            for (input in ingredients) {
+                val ingredient = ensureIngredient(input.name, null) ?: return@withTransaction false
+                val required = when (ingredient.type) {
+                    IngredientType.PRESENCE_ONLY -> null
+                    IngredientType.QUANTITY_TRACKED -> positiveOrDefault(input.requiredAmount)
+                }
+                resolved += ingredient to required
+            }
+            if (resolved.isEmpty()) return@withTransaction false
+
+            val merged = linkedMapOf<Long, Pair<IngredientEntity, Double?>>()
+            for ((ingredient, required) in resolved) {
+                val previous = merged[ingredient.id]
+                merged[ingredient.id] = if (previous == null) {
+                    ingredient to required
+                } else {
+                    val combined = when (ingredient.type) {
+                        IngredientType.PRESENCE_ONLY -> null
+                        IngredientType.QUANTITY_TRACKED ->
+                            (previous.second ?: 0.0) + (required ?: 0.0)
+                    }
+                    ingredient to combined
+                }
+            }
+
+            recipeDao.updateRecipe(
+                recipeId = recipeId,
+                name = normalizedName,
+                nameKey = NameNormalizer.nameKey(normalizedName)
+            )
+            recipeDao.deleteRecipeIngredients(recipeId)
+            recipeDao.insertRecipeIngredients(
+                merged.values.map { (ingredient, requiredAmount) ->
+                    RecipeIngredientEntity(
+                        recipeId = recipeId,
+                        ingredientId = ingredient.id,
+                        requiredAmount = requiredAmount
+                    )
+                }
+            )
             true
         }
     }

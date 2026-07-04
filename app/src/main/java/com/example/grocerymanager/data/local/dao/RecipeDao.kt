@@ -17,14 +17,23 @@ interface RecipeDao {
     @Query("SELECT * FROM recipes WHERE nameKey = :nameKey LIMIT 1")
     suspend fun findByNameKey(nameKey: String): RecipeEntity?
 
+    @Query("SELECT * FROM recipes WHERE id = :recipeId LIMIT 1")
+    suspend fun findById(recipeId: Long): RecipeEntity?
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertRecipe(recipe: RecipeEntity): Long
+
+    @Query("UPDATE recipes SET name = :name, nameKey = :nameKey WHERE id = :recipeId")
+    suspend fun updateRecipe(recipeId: Long, name: String, nameKey: String): Int
 
     @Query("DELETE FROM recipes WHERE id = :recipeId")
     suspend fun deleteById(recipeId: Long): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRecipeIngredients(ingredients: List<RecipeIngredientEntity>)
+
+    @Query("DELETE FROM recipe_ingredients WHERE recipeId = :recipeId")
+    suspend fun deleteRecipeIngredients(recipeId: Long)
 
     @Query(
         """

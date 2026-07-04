@@ -43,6 +43,11 @@ private sealed class PendingAction {
         val recipeName: String,
         val ingredients: List<RecipeIngredientInput>
     ) : PendingAction()
+    data class UpdateRecipe(
+        val recipeId: Long,
+        val recipeName: String,
+        val ingredients: List<RecipeIngredientInput>
+    ) : PendingAction()
 }
 
 class GroceryViewModel(
@@ -173,6 +178,12 @@ class GroceryViewModel(
         }
     }
 
+    fun requestUpdateRecipe(recipeId: Long, name: String, inputs: List<RecipeIngredientInput>) {
+        viewModelScope.launch {
+            updateRecipeInternal(recipeId, name, inputs)
+        }
+    }
+
     fun deleteRecipe(recipeId: Long) {
         viewModelScope.launch {
             repository.deleteRecipe(recipeId)
@@ -216,6 +227,11 @@ class GroceryViewModel(
                 is PendingAction.AddStorage -> repository.addStorageItem(action.name, action.amount)
                 is PendingAction.AddShopping -> repository.addShoppingItem(action.name, action.quantity)
                 is PendingAction.AddRecipe -> addRecipeInternal(action.recipeName, action.ingredients)
+                is PendingAction.UpdateRecipe -> updateRecipeInternal(
+                    action.recipeId,
+                    action.recipeName,
+                    action.ingredients
+                )
             }
         }
     }
@@ -253,6 +269,34 @@ class GroceryViewModel(
         }
 
         repository.addRecipe(normalizedRecipeName, cleanedInputs)
+    }
+
+    private suspend fun updateRecipeInternal(
+        recipeId: Long,
+        name: String,
+        inputs: List<RecipeIngredientInput>
+    ) {
+        val normalizedRecipeName = NameNormalizer.normalizeName(name)
+        if (normalizedRecipeName.isBlank()) return
+
+        val cleanedInputs = inputs.mapNotNull { input ->
+            val normalizedName = NameNormalizer.normalizeName(input.name)
+            if (normalizedName.isBlank()) {
+                null
+            } else {
+                RecipeIngredientInput(name = normalizedName, requiredAmount = input.requiredAmount)
+            }
+        }
+        if (cleanedInputs.isEmpty()) return
+
+        val unknown = cleanedInputs.firstOrNull { repository.findIngredientByName(it.name) == null }
+        if (unknown != null) {
+            pendingAction = PendingAction.UpdateRecipe(recipeId, normalizedRecipeName, cleanedInputs)
+            _pendingPrompt.value = PendingIngredientPrompt(unknown.name)
+            return
+        }
+
+        repository.updateRecipe(recipeId, normalizedRecipeName, cleanedInputs)
     }
 
     companion object {

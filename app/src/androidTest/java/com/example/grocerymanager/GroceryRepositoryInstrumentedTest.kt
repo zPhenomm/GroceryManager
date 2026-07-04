@@ -14,6 +14,7 @@ import com.example.grocerymanager.data.local.StorageEntryEntity
 import com.example.grocerymanager.data.repo.GroceryRepository
 import com.example.grocerymanager.data.repo.GroceryRepositoryImpl
 import com.example.grocerymanager.data.repo.NewIngredientMetaInput
+import com.example.grocerymanager.data.repo.RecipeIngredientInput
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -111,6 +112,29 @@ class GroceryRepositoryInstrumentedTest {
 
         val recipes = repository.observeRecipes().first()
         assertFalse(recipes.any { it.name == "Omelet" })
+    }
+
+    @Test
+    fun update_recipe_changes_name_ingredients_and_amounts() = runBlocking {
+        val omelet = repository.observeRecipes().first().first { it.name == "Omelet" }
+
+        val updated = repository.updateRecipe(
+            recipeId = omelet.recipeId,
+            name = "Cheese Omelet",
+            ingredients = listOf(
+                RecipeIngredientInput(name = "Eggs", requiredAmount = 2.0),
+                RecipeIngredientInput(name = "Salt", requiredAmount = null),
+                RecipeIngredientInput(name = "Flour", requiredAmount = 0.5)
+            )
+        )
+
+        assertTrue(updated)
+        val recipe = repository.observeRecipes().first().first { it.recipeId == omelet.recipeId }
+        assertEquals("Cheese Omelet", recipe.name)
+        assertEquals(listOf("Eggs", "Flour", "Salt"), recipe.ingredients.map { it.name })
+        assertEquals(2.0, recipe.ingredients.first { it.name == "Eggs" }.requiredAmount ?: 0.0, 0.0001)
+        assertEquals(0.5, recipe.ingredients.first { it.name == "Flour" }.requiredAmount ?: 0.0, 0.0001)
+        assertFalse(recipe.ingredients.any { it.name == "Milk" })
     }
 
     @Test

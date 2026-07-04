@@ -99,6 +99,7 @@ private fun GroceryManagerApp() {
     val activity = context as? Activity
     val showExitDialogState = rememberSaveable { mutableStateOf(false) }
     val isCreatingRecipeState = rememberSaveable { mutableStateOf(false) }
+    val editingRecipeIdState = rememberSaveable { mutableStateOf<Long?>(null) }
     val viewModel: GroceryViewModel = viewModel(factory = GroceryViewModel.factory(context = context))
     val selectedTab by viewModel.selectedTab.collectAsState()
     val storageItems by viewModel.storageItems.collectAsState()
@@ -147,7 +148,7 @@ private fun GroceryManagerApp() {
                     title = {
                         Text(
                             if (selectedTab == MainTab.Recipes && isCreatingRecipeState.value) {
-                                "Create recipe"
+                                if (editingRecipeIdState.value == null) "Create recipe" else "Edit recipe"
                             } else {
                                 selectedTab.title
                             }
@@ -156,14 +157,20 @@ private fun GroceryManagerApp() {
                     actions = {
                         if (selectedTab == MainTab.Recipes) {
                             if (isCreatingRecipeState.value) {
-                                TextButton(onClick = { isCreatingRecipeState.value = false }) {
+                                TextButton(onClick = {
+                                    isCreatingRecipeState.value = false
+                                    editingRecipeIdState.value = null
+                                }) {
                                     Text(
                                         text = "Back",
                                         style = MaterialTheme.typography.labelLarge.copy(fontSize = 15.sp)
                                     )
                                 }
                             } else {
-                                TextButton(onClick = { isCreatingRecipeState.value = true }) {
+                                TextButton(onClick = {
+                                    editingRecipeIdState.value = null
+                                    isCreatingRecipeState.value = true
+                                }) {
                                     Text(
                                         text = "Create",
                                         style = MaterialTheme.typography.labelLarge.copy(fontSize = 15.sp)
@@ -195,11 +202,20 @@ private fun GroceryManagerApp() {
                 MainTab.Recipes -> RecipesScreen(
                     recipes = recipes,
                     onAddRecipe = viewModel::requestAddRecipe,
+                    onUpdateRecipe = viewModel::requestUpdateRecipe,
                     onDeleteRecipe = viewModel::deleteRecipe,
                     onAddMissingToShopping = viewModel::addMissingIngredientsToShopping,
                     onCookRecipe = viewModel::cookRecipe,
                     isCreatingRecipe = isCreatingRecipeState.value,
-                    onDoneCreatingRecipe = { isCreatingRecipeState.value = false },
+                    editingRecipeId = editingRecipeIdState.value,
+                    onEditRecipe = { recipeId ->
+                        editingRecipeIdState.value = recipeId
+                        isCreatingRecipeState.value = true
+                    },
+                    onDoneCreatingRecipe = {
+                        isCreatingRecipeState.value = false
+                        editingRecipeIdState.value = null
+                    },
                     suggestionProvider = viewModel::searchIngredientSuggestions,
                     modifier = if (isCreatingRecipeState.value) {
                         Modifier.padding(
@@ -390,10 +406,13 @@ private data class RecipeDraftIngredient(
 private fun RecipesScreen(
     recipes: List<RecipeUiModel>,
     onAddRecipe: (String, List<RecipeIngredientInput>) -> Unit,
+    onUpdateRecipe: (Long, String, List<RecipeIngredientInput>) -> Unit,
     onDeleteRecipe: (Long) -> Unit,
     onAddMissingToShopping: (Long) -> Unit,
     onCookRecipe: (Long) -> Unit,
     isCreatingRecipe: Boolean,
+    editingRecipeId: Long?,
+    onEditRecipe: (Long) -> Unit,
     onDoneCreatingRecipe: () -> Unit,
     suggestionProvider: (String) -> kotlinx.coroutines.flow.Flow<List<IngredientSuggestion>>,
     modifier: Modifier = Modifier
@@ -403,6 +422,9 @@ private fun RecipesScreen(
     var deleteRecipeId by rememberSaveable { mutableStateOf<Long?>(null) }
     val draftIngredients = remember {
         mutableStateListOf(RecipeDraftIngredient(id = 1, name = "", amountText = ""))
+    }
+    val editingRecipe = remember(recipes, editingRecipeId) {
+        editingRecipeId?.let { id -> recipes.firstOrNull { it.recipeId == id } }
     }
     val deleteRecipeItem = remember(recipes, deleteRecipeId) {
         deleteRecipeId?.let { id -> recipes.firstOrNull { it.recipeId == id } }
@@ -418,6 +440,31 @@ private fun RecipesScreen(
             },
             onDismiss = { deleteRecipeId = null }
         )
+    }
+
+    LaunchedEffect(isCreatingRecipe, editingRecipeId, editingRecipe?.recipeId) {
+        if (isCreatingRecipe) {
+            recipeNameState.value = editingRecipe?.name.orEmpty()
+            draftIngredients.clear()
+            if (editingRecipe == null || editingRecipe.ingredients.isEmpty()) {
+                draftIngredients.add(RecipeDraftIngredient(id = 1, name = "", amountText = ""))
+            } else {
+                editingRecipe.ingredients.forEachIndexed { index, ingredient ->
+                    draftIngredients.add(
+                        RecipeDraftIngredient(
+                            id = index + 1,
+                            name = ingredient.name,
+                            amountText = if (ingredient.type == IngredientType.QUANTITY_TRACKED) {
+                                ingredient.requiredAmount?.let(::formatAmount).orEmpty()
+                            } else {
+                                ""
+                            }
+                        )
+                    )
+                }
+            }
+            nextRowIdState.intValue = draftIngredients.size + 1
+        }
     }
 
     if (isCreatingRecipe) {
@@ -449,7 +496,11 @@ private fun RecipesScreen(
                         )
                     }
                 }
-                onAddRecipe(recipeNameState.value, inputs)
+                if (editingRecipeId == null) {
+                    onAddRecipe(recipeNameState.value, inputs)
+                } else {
+                    onUpdateRecipe(editingRecipeId, recipeNameState.value, inputs)
+                }
                 recipeNameState.value = ""
                 draftIngredients.clear()
                 draftIngredients.add(RecipeDraftIngredient(id = 1, name = "", amountText = ""))
@@ -459,6 +510,7 @@ private fun RecipesScreen(
             onCancel = onDoneCreatingRecipe,
             canSubmit = recipeNameState.value.isNotBlank() &&
                 draftIngredients.any { NameNormalizer.normalizeName(it.name).isNotBlank() },
+            submitLabel = if (editingRecipeId == null) "Add recipe" else "Save changes",
             suggestionProvider = suggestionProvider,
             modifier = modifier
         )
@@ -479,6 +531,7 @@ private fun RecipesScreen(
                     items(recipes, key = { it.recipeId }) { recipe ->
                         RecipeCard(
                             model = recipe,
+                            onEditRecipe = { onEditRecipe(recipe.recipeId) },
                             onDeleteRecipe = { deleteRecipeId = recipe.recipeId },
                             onAddMissingToShopping = { onAddMissingToShopping(recipe.recipeId) },
                             onCookRecipe = { onCookRecipe(recipe.recipeId) }
@@ -501,6 +554,7 @@ private fun RecipeCreationScreen(
     onSubmit: () -> Unit,
     onCancel: () -> Unit,
     canSubmit: Boolean,
+    submitLabel: String,
     suggestionProvider: (String) -> kotlinx.coroutines.flow.Flow<List<IngredientSuggestion>>,
     modifier: Modifier = Modifier
 ) {
@@ -561,7 +615,7 @@ private fun RecipeCreationScreen(
                 Text("Add ingredient row")
             }
             Button(onClick = onSubmit, enabled = canSubmit) {
-                Text("Add recipe")
+                Text(submitLabel)
             }
         }
     }
@@ -663,6 +717,7 @@ private fun RecipeIngredientRow(
 @Composable
 private fun RecipeCard(
     model: RecipeUiModel,
+    onEditRecipe: () -> Unit,
     onDeleteRecipe: () -> Unit,
     onAddMissingToShopping: () -> Unit,
     onCookRecipe: () -> Unit
@@ -682,12 +737,17 @@ private fun RecipeCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(model.name, fontWeight = FontWeight.SemiBold)
-                if (isCookable) {
-                    Text(
-                        text = "\u2713",
-                        color = Color(0xFF2E7D32),
-                        fontWeight = FontWeight.Bold
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onEditRecipe) {
+                        Text("Edit")
+                    }
+                    if (isCookable) {
+                        Text(
+                            text = "\u2713",
+                            color = Color(0xFF2E7D32),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
             Text(
